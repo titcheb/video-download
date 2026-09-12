@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="description" content="NeonFetch X is a futuristic direct-media download interface for files you own or are authorized to download." />
+  <meta name="keywords" content="direct media downloader, mp4 downloader, media file download, webm downloader, audio downloader" />
+  <meta name="theme-color" content="#050713" />
+  <meta property="og:title" content="NeonFetch X — Direct Media Engine" />
+  <meta property="og:description" content="A fast, private, high-tech direct-media download experience." />
+  <title>NeonFetch X — Direct Media Engine</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <canvas id="particleCanvas" aria-hidden="true"></canvas>
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="scanline" aria-hidden="true"></div>
+  <div class="aurora aurora-a" aria-hidden="true"></div>
+  <div class="aurora aurora-b" aria-hidden="true"></div>
+
+  <header class="topbar shell">
+    <a class="brand" href="#top" aria-label="NeonFetch X home">
+      <span class="brand-mark"><b>N</b><i></i></span>
+      <span class="brand-copy"><strong>NEONFETCH</strong><small>DIRECT MEDIA ENGINE</small></span>
+    </a>
+
+    <nav class="desktop-nav" aria-label="Primary navigation">
+      <a href="#engine">Engine</a>
+      <a href="#features">Features</a>
+      <a href="#privacy">Privacy</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+
+    <div class="nav-actions">
+      <div class="live-pill"><span class="pulse-dot"></span><span>CORE ONLINE</span></div>
+      <button class="icon-btn" id="themeGlowBtn" aria-label="Toggle glow intensity" title="Toggle glow intensity">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.64 5.64l1.42 1.42m9.88 9.88 1.42 1.42M18.36 5.64l-1.42 1.42M7.06 16.94l-1.42 1.42"/><circle cx="12" cy="12" r="4"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero shell">
+      <div class="hero-copy">
+        <div class="micro-badge"><span>NF-X / BUILD 2.0</span><i></i><span>ZERO-STORAGE PIPELINE</span></div>
+        <h1>MEDIA IN.<br><span>FILE OUT.</span></h1>
+        <p class="hero-lead">A futuristic download interface for direct media URLs. Fast inspection, clean delivery, local history, and no permanent server-side file storage.</p>
+        <div class="hero-metrics" aria-label="System metrics">
+          <div><strong>&lt; 1s</strong><span>UI RESPONSE</span></div>
+          <div><strong>500 MB</strong><span>DEMO LIMIT</span></div>
+          <div><strong>0</strong><span>FILES STORED</span></div>
+        </div>
+      </div>
+
+      <div class="hero-orbit" aria-hidden="true">
+        <div class="orbit-ring ring-1"></div>
+        <div class="orbit-ring ring-2"></div>
+        <div class="orbit-ring ring-3"></div>
+        <div class="core-sphere">
+          <span>NF</span>
+          <small>CORE</small>
+        </div>
+        <span class="satellite s1"></span>
+        <span class="satellite s2"></span>
+        <span class="satellite s3"></span>
+      </div>
+    </section>
+
+    <section id="engine" class="engine shell">
+      <div class="engine-frame">
+        <div class="frame-topline">
+          <div class="terminal-title"><span class="terminal-dots"><i></i><i></i><i></i></span><span>NEONFETCH / INGEST CONSOLE</span></div>
+          <div class="secure-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.7 2.9 8 7 10 4.1-2 7-5.3 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></svg> DIRECT MODE</div>
+        </div>
+
+        <div class="engine-grid">
+          <div class="console-main">
+            <label class="input-label" for="urlInput">MEDIA SOURCE URL</label>
+            <div class="url-input-wrap">
+              <div class="protocol-chip">HTTPS</div>
+              <input id="urlInput" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://example.com/media/video.mp4" />
+              <button id="pasteBtn" class="input-action" type="button">PASTE</button>
+              <button id="clearBtn" class="input-action subtle hidden" type="button">CLEAR</button>
+            </div>
+
+            <div class="format-strip">
+              <span>DIRECT FILES</span>
+              <b>MP4</b><b>WEBM</b><b>MOV</b><b>MP3</b><b>M4A</b><b>OGG</b>
+            </div>
+
+            <button id="analyzeBtn" class="quantum-btn" type="button">
+              <span class="btn-bg"></span>
+              <span class="btn-copy"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m13 2-8 12h6l-1 8 9-13h-6l0-7Z"/></svg><b>INITIALIZE SCAN</b></span>
+            </button>
+
+            <div id="scanPanel" class="scan-panel hidden" aria-live="polite">
+              <div class="scan-head"><span id="scanStatus">Initializing secure inspection...</span><strong id="scanPercent">0%</strong></div>
+              <div class="progress-track"><i id="scanBar"></i></div>
+              <div class="scan-steps">
+                <span data-step="1"><i></i> Parse URL</span>
+                <span data-step="2"><i></i> Validate host</span>
+                <span data-step="3"><i></i> Inspect media</span>
+                <span data-step="4"><i></i> Build download</span>
+              </div>
+            </div>
+
+            <div id="result" class="result-panel hidden" aria-live="polite">
+              <div class="result-visual">
+                <div class="media-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5z"/><path d="m10 9 5 3-5 3V9Z"/></svg></div>
+                <div class="result-info">
+                  <span class="result-kicker">MEDIA READY</span>
+                  <strong id="filename">media.mp4</strong>
+                  <div id="meta">video/mp4 • size unknown</div>
+                </div>
+              </div>
+              <div class="result-actions">
+                <button id="copySourceBtn" class="secondary-btn" type="button">COPY SOURCE</button>
+                <a id="downloadBtn" class="download-btn" href="#"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 20h14"/></svg>DOWNLOAD FILE</a>
+              </div>
+            </div>
+
+            <div id="error" class="error-panel hidden" role="alert">
+              <div class="error-icon">!</div>
+              <div><strong>SCAN INTERRUPTED</strong><p id="errorText"></p></div>
+            </div>
+          </div>
+
+          <aside class="telemetry-panel">
+            <div class="telemetry-title"><span>SYSTEM TELEMETRY</span><i>LIVE</i></div>
+            <div class="radar-wrap">
+              <div class="radar"><span></span><i></i><b></b></div>
+              <div class="radar-copy"><strong id="networkState">READY</strong><span>NETWORK CORE</span></div>
+            </div>
+            <div class="telemetry-list">
+              <div><span>Transport</span><strong>TLS / HTTPS</strong></div>
+              <div><span>Storage</span><strong>EPHEMERAL</strong></div>
+              <div><span>Mode</span><strong>STREAM</strong></div>
+              <div><span>Client</span><strong id="clientType">WEB</strong></div>
+            </div>
+            <div class="tiny-chart" aria-hidden="true">
+              <svg viewBox="0 0 300 70" preserveAspectRatio="none"><path d="M0 56 C35 54,45 28,78 39 S124 62,148 36 S194 10,222 37 S268 46,300 18"/><path class="fill" d="M0 56 C35 54,45 28,78 39 S124 62,148 36 S194 10,222 37 S268 46,300 18 L300 70 L0 70Z"/></svg>
+            </div>
+            <div class="telemetry-note">Platform pages and DRM-protected sources are intentionally not bypassed.</div>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section class="recent shell" id="recentSection">
+      <div class="section-row-head">
+        <div><div class="eyebrow">LOCAL SESSION</div><h2>Recent targets</h2></div>
+        <button id="clearHistoryBtn" class="text-btn" type="button">CLEAR HISTORY</button>
+      </div>
+      <div id="historyGrid" class="history-grid"></div>
+      <div id="historyEmpty" class="history-empty">No analyzed media yet. Recent direct URLs appear here on this device only.</div>
+    </section>
+
+    <section id="features" class="features shell">
+      <div class="section-center">
+        <div class="eyebrow">ENGINE ARCHITECTURE</div>
+        <h2>Designed like a tool.<br><span>Not an ad maze.</span></h2>
+      </div>
+      <div class="feature-grid">
+        <article class="feature-card wide">
+          <div class="card-code">01 / STREAM</div>
+          <div class="stream-art" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
+          <h3>Direct streaming pipeline</h3>
+          <p>The backend relays eligible media to the browser without keeping a permanent copy on disk.</p>
+        </article>
+        <article class="feature-card">
+          <div class="card-code">02 / GUARD</div>
+          <div class="hex-icon">⌁</div>
+          <h3>Source guard</h3>
+          <p>Basic host validation and private-network blocking help reduce unsafe server-side requests.</p>
+        </article>
+        <article class="feature-card">
+          <div class="card-code">03 / LOCAL</div>
+          <div class="hex-icon">◇</div>
+          <h3>Private local history</h3>
+          <p>Recent successful inspections are stored only in your browser's local storage.</p>
+        </article>
+        <article class="feature-card wide">
+          <div class="card-code">04 / MOBILE</div>
+          <div class="device-art" aria-hidden="true"><div class="phone"><i></i><span></span></div><div class="signal"><b></b><b></b><b></b></div></div>
+          <h3>Responsive from 320px to ultrawide</h3>
+          <p>The interface adapts to mobile, tablet, desktop, and large monitors without losing the console-style interaction.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="privacy" class="privacy shell">
+      <div class="privacy-panel">
+        <div class="privacy-copy">
+          <div class="eyebrow">PRIVACY LAYER</div>
+          <h2>Nothing to warehouse.</h2>
+          <p>This build is designed around transient streaming. The server fetches eligible direct media and pipes it to the client instead of building a permanent media library.</p>
+          <div class="privacy-points"><span>NO ACCOUNT REQUIRED</span><span>NO PERMANENT FILE STORAGE</span><span>NO TRACKING SDK INCLUDED</span></div>
+        </div>
+        <div class="privacy-orb" aria-hidden="true"><div class="lock"><svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div><i></i><b></b></div>
+      </div>
+    </section>
+
+    <section id="faq" class="faq shell">
+      <div class="section-center compact"><div class="eyebrow">FAQ / POLICY</div><h2>Know the boundaries.</h2></div>
+      <div class="faq-list">
+        <details open>
+          <summary><span>Can this download any webpage video?</span><b>+</b></summary>
+          <p>No. It accepts eligible direct media-file URLs. It intentionally does not bypass platform restrictions, login gates, DRM, or protected streaming systems.</p>
+        </details>
+        <details>
+          <summary><span>Why does a normal Dailymotion or YouTube page fail?</span><b>+</b></summary>
+          <p>Those are platform pages rather than direct media-file URLs. This build blocks major platform hosts instead of extracting protected streams.</p>
+        </details>
+        <details>
+          <summary><span>Can I deploy this publicly?</span><b>+</b></summary>
+          <p>Yes, but production deployment should add rate limiting, stronger DNS-rebinding protection, monitoring, abuse controls, HTTPS, and host-level bandwidth limits.</p>
+        </details>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer shell">
+    <div class="footer-brand"><span class="brand-mark mini"><b>N</b><i></i></span><div><strong>NEONFETCH X</strong><span>DIRECT MEDIA ENGINE</span></div></div>
+    <div class="footer-copy">Use only for media you own, public-domain media, or files you are authorized to download.</div>
+    <div class="footer-meta">BUILD 2.0 • <span id="year"></span></div>
+  </footer>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
