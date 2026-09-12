@@ -54,7 +54,7 @@ app.get("/favicon.svg", (req, res) => res.sendFile(path.join(__dirname, "favicon
 app.get("/api/health", (req, res) => res.json({
   ok: true,
   service: "NeonFetch X",
-  version: "3.0.0",
+  version: "3.1.0",
   mode: "authorized-public-media",
   dailymotionNative: true,
   extractor: "yt-dlp fallback",
@@ -82,20 +82,14 @@ async function validateUrl(raw) {
   if (!["http:", "https:"].includes(u.protocol)) throw new Error("Only HTTP and HTTPS URLs are supported.");
   if (u.username || u.password) throw new Error("URLs containing embedded credentials are not allowed.");
   const host = u.hostname.toLowerCase();
-  if (["localhost", "metadata.google.internal", "169.254.169.254"].some(x => host === x || host.endsWith(`.${x}`))) {
-    throw new Error("This host is not allowed.");
-  }
+  if (["localhost", "metadata.google.internal", "169.254.169.254"].some(x => host === x || host.endsWith(`.${x}`))) throw new Error("This host is not allowed.");
   const records = await dns.lookup(host, { all: true });
   if (!records.length || records.some(r => isPrivateIp(r.address))) throw new Error("Local/private network URLs are not allowed.");
   return u;
 }
 
 function safeName(value, fallback = "media") {
-  return String(value || fallback)
-    .replace(/[^a-zA-Z0-9._ -]/g, "_")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 110) || fallback;
+  return String(value || fallback).replace(/[^a-zA-Z0-9._ -]/g, "_").replace(/\s+/g, " ").trim().slice(0, 110) || fallback;
 }
 
 function formatBytes(n) {
@@ -115,13 +109,8 @@ function extractDailymotionId(rawUrl) {
   try {
     const u = new URL(rawUrl);
     const host = u.hostname.toLowerCase();
-    if (host === "dai.ly" || host.endsWith(".dai.ly")) {
-      return u.pathname.split("/").filter(Boolean)[0] || null;
-    }
-    if (host === "dailymotion.com" || host.endsWith(".dailymotion.com")) {
-      const m = u.pathname.match(/\/video\/([a-zA-Z0-9]+)/i);
-      return m?.[1] || null;
-    }
+    if (host === "dai.ly" || host.endsWith(".dai.ly")) return u.pathname.split("/").filter(Boolean)[0] || null;
+    if (host === "dailymotion.com" || host.endsWith(".dailymotion.com")) return u.pathname.match(/\/video\/([a-zA-Z0-9]+)/i)?.[1] || null;
   } catch {}
   return null;
 }
@@ -130,28 +119,19 @@ async function fetchDmMetadata(id) {
   const pageUrl = `https://www.dailymotion.com/video/${encodeURIComponent(id)}`;
   const metaUrl = `https://www.dailymotion.com/player/metadata/video/${encodeURIComponent(id)}?embedder=${encodeURIComponent("https://www.dailymotion.com")}`;
   const response = await fetch(metaUrl, {
-    headers: {
-      "User-Agent": UA,
-      "Accept": "application/json,text/plain,*/*",
-      "Accept-Language": "en-US,en;q=0.9",
-      "Referer": pageUrl
-    },
+    headers: { "User-Agent": UA, "Accept": "application/json,text/plain,*/*", "Accept-Language": "en-US,en;q=0.9", "Referer": pageUrl },
     redirect: "follow",
     signal: AbortSignal.timeout(15000)
   });
   if (!response.ok) throw new Error(`Dailymotion metadata returned ${response.status}.`);
   const data = await response.json();
-  if (data?.error) {
-    const code = data.error.code || data.error.type || "unavailable";
-    throw new Error(`Dailymotion video is unavailable (${code}).`);
-  }
+  if (data?.error) throw new Error(`Dailymotion video is unavailable (${data.error.code || data.error.type || "unavailable"}).`);
   return data;
 }
 
 function bestDmPoster(posters) {
   if (!posters || typeof posters !== "object") return null;
-  const keys = Object.keys(posters).sort((a, b) => Number(b) - Number(a));
-  for (const key of keys) {
+  for (const key of Object.keys(posters).sort((a, b) => Number(b) - Number(a))) {
     const v = posters[key];
     if (typeof v === "string" && /^https?:\/\//i.test(v)) return v;
   }
@@ -160,69 +140,33 @@ function bestDmPoster(posters) {
 
 function pickDmEntry(entries = []) {
   if (!Array.isArray(entries)) return null;
-  return entries.find(x => x?.url && /mpegurl|m3u8/i.test(`${x.type || ""} ${x.url}`)) ||
-    entries.find(x => x?.url && /mp4/i.test(`${x.type || ""} ${x.url}`)) ||
+  return entries.find(x => x?.url && /mp4/i.test(`${x.type || ""} ${x.url}`) && !/m3u8/i.test(x.url)) ||
+    entries.find(x => x?.url && /mpegurl|m3u8/i.test(`${x.type || ""} ${x.url}`)) ||
     entries.find(x => x?.url) || null;
 }
 
 async function inspectDailymotion(rawUrl, id) {
   const data = await fetchDmMetadata(id);
   const qualities = data?.qualities && typeof data.qualities === "object" ? data.qualities : {};
-  const numeric = Object.keys(qualities)
-    .filter(k => /^\d+$/.test(k) && Number(k) >= 144)
-    .map(Number)
-    .sort((a, b) => b - a);
-
+  const numeric = Object.keys(qualities).filter(k => /^\d+$/.test(k) && Number(k) >= 144).map(Number).sort((a, b) => b - a);
   const title = safeName(data?.title || `Dailymotion ${id}`);
   const formats = [];
   for (const q of numeric) {
     const entry = pickDmEntry(qualities[String(q)]);
     if (!entry?.url) continue;
-    formats.push({
-      id: `dm-${q}`,
-      label: `${q}p`,
-      quality: `${q}p`,
-      ext: "mp4",
-      size: null,
-      type: "video",
-      downloadUrl: `/api/download?mode=dailymotion&id=${encodeURIComponent(id)}&quality=${q}&name=${encodeURIComponent(`${title} - ${q}p.mp4`)}`
-    });
+    formats.push({ id: `dm-${q}`, label: `${q}p`, quality: `${q}p`, ext: "mp4", size: null, type: "video", downloadUrl: `/api/download?mode=dailymotion&id=${encodeURIComponent(id)}&quality=${q}&name=${encodeURIComponent(`${title} - ${q}p.mp4`)}` });
   }
-
   if (!formats.length) {
     const auto = pickDmEntry(qualities.auto);
-    if (auto?.url) {
-      formats.push({
-        id: "dm-auto",
-        label: "Best available",
-        quality: "Auto",
-        ext: "mp4",
-        size: null,
-        type: "video",
-        downloadUrl: `/api/download?mode=dailymotion&id=${encodeURIComponent(id)}&quality=auto&name=${encodeURIComponent(`${title}.mp4`)}`
-      });
-    }
+    if (auto?.url) formats.push({ id: "dm-auto", label: "Best available", quality: "Auto", ext: "mp4", size: null, type: "video", downloadUrl: `/api/download?mode=dailymotion&id=${encodeURIComponent(id)}&quality=auto&name=${encodeURIComponent(`${title}.mp4`)}` });
   }
-
   if (!formats.length) throw new Error("Dailymotion did not expose a downloadable public stream for this video.");
-
-  return {
-    ok: true,
-    engine: "dailymotion-native",
-    title,
-    uploader: safeName(data?.owner?.screenname || data?.owner?.username || "Dailymotion", "Dailymotion"),
-    thumbnail: bestDmPoster(data?.posters),
-    duration: Number(data?.duration || 0) || null,
-    sourceHost: "dailymotion.com",
-    formats
-  };
+  return { ok: true, engine: "dailymotion-native", title, uploader: safeName(data?.owner?.screenname || data?.owner?.username || "Dailymotion", "Dailymotion"), thumbnail: bestDmPoster(data?.posters), duration: Number(data?.duration || 0) || null, sourceHost: "dailymotion.com", formats };
 }
 
 async function inspectDirect(rawUrl) {
   let r;
-  try {
-    r = await fetch(rawUrl, { method: "HEAD", redirect: "follow", headers: { "User-Agent": UA }, signal: AbortSignal.timeout(10000) });
-  } catch {}
+  try { r = await fetch(rawUrl, { method: "HEAD", redirect: "follow", headers: { "User-Agent": UA }, signal: AbortSignal.timeout(10000) }); } catch {}
   if (!r?.ok || !r.headers.get("content-type")) return null;
   const type = String(r.headers.get("content-type") || "").toLowerCase();
   if (!/^(video|audio|image)\//.test(type) && !type.startsWith("application/octet-stream")) return null;
@@ -230,30 +174,11 @@ async function inspectDirect(rawUrl) {
   if (len && len > MAX_BYTES) throw new Error("File is larger than the 500 MB limit.");
   const u = new URL(rawUrl);
   const filename = safeName(decodeURIComponent(path.basename(u.pathname)) || "download");
-  return {
-    ok: true,
-    engine: "direct",
-    title: filename,
-    uploader: u.hostname,
-    thumbnail: null,
-    duration: null,
-    sourceHost: u.hostname,
-    formats: [{ id: "direct", label: "Original quality", quality: "Original", ext: path.extname(filename).slice(1) || "file", size: formatBytes(len), type: type.startsWith("audio/") ? "audio" : "video", downloadUrl: `/api/download?mode=direct&url=${encodeURIComponent(rawUrl)}` }]
-  };
+  return { ok: true, engine: "direct", title: filename, uploader: u.hostname, thumbnail: null, duration: null, sourceHost: u.hostname, formats: [{ id: "direct", label: "Original quality", quality: "Original", ext: path.extname(filename).slice(1) || "file", size: formatBytes(len), type: type.startsWith("audio/") ? "audio" : "video", downloadUrl: `/api/download?mode=direct&url=${encodeURIComponent(rawUrl)}` }] };
 }
 
 async function inspectGeneric(rawUrl) {
-  const output = await youtubedl(rawUrl, {
-    dumpSingleJson: true,
-    skipDownload: true,
-    noPlaylist: true,
-    noWarnings: true,
-    quiet: true,
-    ffmpegLocation: ffmpegPath || undefined,
-    socketTimeout: 15,
-    retries: 1,
-    fragmentRetries: 1
-  }, { timeout: 35000 });
+  const output = await youtubedl(rawUrl, { dumpSingleJson: true, skipDownload: true, noPlaylist: true, noWarnings: true, quiet: true, ffmpegLocation: ffmpegPath || undefined, socketTimeout: 15, retries: 1, fragmentRetries: 1 }, { timeout: 35000 });
   const info = typeof output === "string" ? JSON.parse(output) : output;
   if (!info) throw new Error("No media information returned.");
   if (info?._type === "playlist" || Array.isArray(info?.entries)) throw new Error("Playlists and bulk downloads are not supported.");
@@ -261,33 +186,14 @@ async function inspectGeneric(rawUrl) {
   if (["private", "premium_only", "subscriber_only", "needs_auth"].includes(availability)) throw new Error("Private, paid, subscriber-only, or login-required media is not supported.");
   if (info?.is_live || ["is_live", "is_upcoming"].includes(String(info?.live_status || ""))) throw new Error("Live streams are not supported.");
   if (Number(info?.age_limit || 0) >= 18) throw new Error("Age-restricted media is not supported without an official authenticated workflow.");
-
   const src = Array.isArray(info.formats) ? info.formats : [];
   const usable = src.filter(f => f?.format_id && f?.url && !f.has_drm && f.vcodec && f.vcodec !== "none");
   const heights = [...new Set(usable.map(f => Number(f.height || 0)).filter(Boolean))].sort((a, b) => b - a).slice(0, 8);
   const title = safeName(info.title || "media");
-  const formats = heights.map(h => ({
-    id: `best-${h}`,
-    label: `${h}p`,
-    quality: `${h}p`,
-    ext: "mp4",
-    size: null,
-    type: "video",
-    downloadUrl: `/api/download?mode=generic&url=${encodeURIComponent(rawUrl)}&height=${h}&name=${encodeURIComponent(`${title} - ${h}p.mp4`)}`
-  }));
-  const hasAudio = src.some(f => f?.url && !f.has_drm && f.acodec && f.acodec !== "none");
-  if (hasAudio) formats.push({ id: "audio", label: "Best audio", quality: "Audio", ext: "m4a", size: null, type: "audio", downloadUrl: `/api/download?mode=generic-audio&url=${encodeURIComponent(rawUrl)}&name=${encodeURIComponent(`${title} - audio.m4a`)}` });
+  const formats = heights.map(h => ({ id: `best-${h}`, label: `${h}p`, quality: `${h}p`, ext: "mp4", size: null, type: "video", downloadUrl: `/api/download?mode=generic&url=${encodeURIComponent(rawUrl)}&height=${h}&name=${encodeURIComponent(`${title} - ${h}p.mp4`)}` }));
+  if (src.some(f => f?.url && !f.has_drm && f.acodec && f.acodec !== "none")) formats.push({ id: "audio", label: "Best audio", quality: "Audio", ext: "m4a", size: null, type: "audio", downloadUrl: `/api/download?mode=generic-audio&url=${encodeURIComponent(rawUrl)}&name=${encodeURIComponent(`${title} - audio.m4a`)}` });
   if (!formats.length) throw new Error("No downloadable non-DRM format was found.");
-  return {
-    ok: true,
-    engine: "yt-dlp",
-    title,
-    uploader: safeName(info.uploader || info.channel || new URL(rawUrl).hostname),
-    thumbnail: /^https?:\/\//i.test(String(info.thumbnail || "")) ? info.thumbnail : null,
-    duration: Number(info.duration || 0) || null,
-    sourceHost: new URL(rawUrl).hostname,
-    formats
-  };
+  return { ok: true, engine: "yt-dlp", title, uploader: safeName(info.uploader || info.channel || new URL(rawUrl).hostname), thumbnail: /^https?:\/\//i.test(String(info.thumbnail || "")) ? info.thumbnail : null, duration: Number(info.duration || 0) || null, sourceHost: new URL(rawUrl).hostname, formats };
 }
 
 app.post("/api/inspect", rateLimit(30, 10 * 60 * 1000), async (req, res) => {
@@ -295,19 +201,15 @@ app.post("/api/inspect", rateLimit(30, 10 * 60 * 1000), async (req, res) => {
   try {
     if (!rawUrl) throw new Error("Paste a video or media URL first.");
     await validateUrl(rawUrl);
-
     const dmId = extractDailymotionId(rawUrl);
     if (dmId) {
       const dm = await inspectDailymotion(rawUrl, dmId);
       console.log(`[inspect] Dailymotion ${dmId}: ${dm.formats.length} formats`);
       return res.json(dm);
     }
-
     const direct = await inspectDirect(rawUrl).catch(() => null);
     if (direct) return res.json(direct);
-
-    const generic = await inspectGeneric(rawUrl);
-    return res.json(generic);
+    return res.json(await inspectGeneric(rawUrl));
   } catch (err) {
     console.error(`[inspect] ${rawUrl}:`, err?.message || err);
     res.status(400).json({ ok: false, error: err?.message || "Unable to inspect this URL." });
@@ -332,20 +234,63 @@ async function runFfmpegToFile(inputUrl, outputPath, referer = "https://www.dail
   if (!ffmpegPath) throw new Error("FFmpeg is unavailable on this server.");
   await new Promise((resolve, reject) => {
     const args = [
-      "-hide_banner", "-loglevel", "error",
+      "-hide_banner", "-nostdin", "-loglevel", "warning",
+      "-rw_timeout", "30000000",
+      "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
       "-user_agent", UA,
-      "-headers", `Referer: ${referer}\r\nOrigin: https://www.dailymotion.com\r\n`,
+      "-headers", `Referer: ${referer}\r\nOrigin: https://www.dailymotion.com\r\nAccept: */*\r\n`,
       "-i", inputUrl,
+      "-map", "0:v:0?", "-map", "0:a:0?",
       "-c", "copy",
       "-movflags", "+faststart",
       "-y", outputPath
     ];
     const child = spawn(ffmpegPath, args, { stdio: ["ignore", "ignore", "pipe"] });
     let err = "";
-    child.stderr.on("data", d => { if (err.length < 5000) err += d.toString(); });
+    child.stderr.on("data", d => { if (err.length < 12000) err += d.toString(); });
     child.on("error", reject);
-    child.on("close", code => code === 0 ? resolve() : reject(new Error(err.trim() || `FFmpeg exited with ${code}`)));
+    child.on("close", (code, signal) => {
+      if (code === 0) return resolve();
+      reject(new Error(err.trim() || `FFmpeg terminated (code=${code ?? "null"}, signal=${signal || "none"})`));
+    });
   });
+}
+
+async function runYtdlpToFile(url, selector, ext, name, res) {
+  const token = `neonfetch-${randomUUID()}`;
+  const template = path.join(os.tmpdir(), `${token}.%(ext)s`);
+  let files = [];
+  try {
+    await youtubedl(url, { format: selector, output: template, noPlaylist: true, noWarnings: true, quiet: true, ffmpegLocation: ffmpegPath || undefined, mergeOutputFormat: ext === "mp4" ? "mp4" : undefined, maxFilesize: "500M", socketTimeout: 25, retries: 2, fragmentRetries: 2, concurrentFragments: 1 }, { timeout: 180000 });
+    files = (await fsp.readdir(os.tmpdir())).filter(x => x.startsWith(`${token}.`)).map(x => path.join(os.tmpdir(), x));
+    if (!files.length) throw new Error("The selected quality could not be prepared.");
+    const filePath = files[0];
+    const stat = await fsp.stat(filePath);
+    if (stat.size > MAX_BYTES) throw new Error("Prepared file is larger than the 500 MB limit.");
+    const finalExt = path.extname(filePath).slice(1) || ext;
+    const filename = safeName(name || `media.${finalExt}`);
+    res.setHeader("Content-Type", contentTypeForExt(finalExt));
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Length", String(stat.size));
+    res.setHeader("Cache-Control", "no-store");
+    const stream = fs.createReadStream(filePath);
+    const cleanup = () => Promise.all(files.map(f => fsp.unlink(f).catch(() => {})));
+    stream.on("error", async () => { await cleanup(); if (!res.headersSent) res.status(500).end(); else res.destroy(); });
+    stream.on("close", cleanup);
+    return stream.pipe(res);
+  } catch (err) {
+    if (!files.length) files = (await fsp.readdir(os.tmpdir()).catch(() => [])).filter(x => x.startsWith(`${token}.`)).map(x => path.join(os.tmpdir(), x));
+    await Promise.all(files.map(f => fsp.unlink(f).catch(() => {})));
+    throw err;
+  }
+}
+
+async function runYtdlpDmFallback(id, quality, name, res) {
+  const url = `https://www.dailymotion.com/video/${id}`;
+  const q = /^\d+$/.test(String(quality)) ? Number(quality) : 720;
+  const capped = Math.min(2160, Math.max(144, q));
+  console.log(`[download] Dailymotion ${id}: trying yt-dlp fallback ${capped}p`);
+  return runYtdlpToFile(url, `bv*[height<=${capped}]+ba/b[height<=${capped}]/b`, "mp4", name, res);
 }
 
 async function downloadDm(id, quality, name, res) {
@@ -354,76 +299,44 @@ async function downloadDm(id, quality, name, res) {
   const entries = data?.qualities?.[q] || (q === "auto" ? data?.qualities?.auto : null);
   const entry = pickDmEntry(entries);
   if (!entry?.url) throw new Error(`Dailymotion quality ${q} is no longer available.`);
-
   const filename = safeName(name || `${safeName(data?.title || id)} - ${q}p.mp4`).replace(/\.mp4$/i, "") + ".mp4";
-  if (/\.m3u8(?:\?|$)/i.test(entry.url) || /mpegurl/i.test(String(entry.type || ""))) {
-    const token = `neonfetch-dm-${randomUUID()}`;
-    const outputPath = path.join(os.tmpdir(), `${token}.mp4`);
-    try {
-      await runFfmpegToFile(entry.url, outputPath, `https://www.dailymotion.com/video/${id}`);
-      const stat = await fsp.stat(outputPath);
-      if (stat.size > MAX_BYTES) throw new Error("Prepared file is larger than the 500 MB limit.");
-      res.setHeader("Content-Type", "video/mp4");
-      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-      res.setHeader("Content-Length", String(stat.size));
-      res.setHeader("Cache-Control", "no-store");
-      const stream = fs.createReadStream(outputPath);
-      const cleanup = () => fsp.unlink(outputPath).catch(() => {});
-      stream.on("error", async () => { await cleanup(); if (!res.headersSent) res.status(500).end(); else res.destroy(); });
-      stream.on("close", cleanup);
-      return stream.pipe(res);
-    } catch (e) {
-      await fsp.unlink(outputPath).catch(() => {});
-      throw e;
-    }
+
+  if (!/\.m3u8(?:\?|$)/i.test(entry.url) && !/mpegurl/i.test(String(entry.type || ""))) {
+    const upstream = await fetch(entry.url, { headers: { "User-Agent": UA, "Referer": `https://www.dailymotion.com/video/${id}` }, redirect: "follow", signal: AbortSignal.timeout(60000) });
+    if (!upstream.ok) throw new Error(`Dailymotion media returned ${upstream.status}.`);
+    res.setHeader("Content-Type", upstream.headers.get("content-type") || "video/mp4");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Cache-Control", "no-store");
+    if (!upstream.body) throw new Error("No Dailymotion response body.");
+    return Readable.fromWeb(upstream.body).pipe(res);
   }
 
-  const upstream = await fetch(entry.url, {
-    headers: { "User-Agent": UA, "Referer": `https://www.dailymotion.com/video/${id}` },
-    redirect: "follow",
-    signal: AbortSignal.timeout(60000)
-  });
-  if (!upstream.ok) throw new Error(`Dailymotion media returned ${upstream.status}.`);
-  res.setHeader("Content-Type", upstream.headers.get("content-type") || "video/mp4");
-  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-  res.setHeader("Cache-Control", "no-store");
-  if (!upstream.body) throw new Error("No Dailymotion response body.");
-  return Readable.fromWeb(upstream.body).pipe(res);
-}
-
-async function runYtdlpToFile(url, selector, ext, name, res) {
-  const token = `neonfetch-${randomUUID()}`;
-  const template = path.join(os.tmpdir(), `${token}.%(ext)s`);
-  await youtubedl(url, {
-    format: selector,
-    output: template,
-    noPlaylist: true,
-    noWarnings: true,
-    quiet: true,
-    ffmpegLocation: ffmpegPath || undefined,
-    mergeOutputFormat: ext === "mp4" ? "mp4" : undefined,
-    maxFilesize: "500M",
-    socketTimeout: 25,
-    retries: 1,
-    fragmentRetries: 1,
-    concurrentFragments: 2
-  }, { timeout: 180000 });
-  const files = (await fsp.readdir(os.tmpdir())).filter(x => x.startsWith(`${token}.`)).map(x => path.join(os.tmpdir(), x));
-  if (!files.length) throw new Error("The selected quality could not be prepared.");
-  const filePath = files[0];
-  const stat = await fsp.stat(filePath);
-  if (stat.size > MAX_BYTES) throw new Error("Prepared file is larger than the 500 MB limit.");
-  const finalExt = path.extname(filePath).slice(1) || ext;
-  const filename = safeName(name || `media.${finalExt}`);
-  res.setHeader("Content-Type", contentTypeForExt(finalExt));
-  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-  res.setHeader("Content-Length", String(stat.size));
-  res.setHeader("Cache-Control", "no-store");
-  const stream = fs.createReadStream(filePath);
-  const cleanup = () => Promise.all(files.map(f => fsp.unlink(f).catch(() => {})));
-  stream.on("error", async () => { await cleanup(); if (!res.headersSent) res.status(500).end(); else res.destroy(); });
-  stream.on("close", cleanup);
-  return stream.pipe(res);
+  const token = `neonfetch-dm-${randomUUID()}`;
+  const outputPath = path.join(os.tmpdir(), `${token}.mp4`);
+  try {
+    console.log(`[download] Dailymotion ${id}: FFmpeg native ${q} (${entry.type || "unknown"})`);
+    await runFfmpegToFile(entry.url, outputPath, `https://www.dailymotion.com/video/${id}`);
+    const stat = await fsp.stat(outputPath);
+    if (stat.size > MAX_BYTES) throw new Error("Prepared file is larger than the 500 MB limit.");
+    res.setHeader("Content-Type", "video/mp4");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Length", String(stat.size));
+    res.setHeader("Cache-Control", "no-store");
+    const stream = fs.createReadStream(outputPath);
+    const cleanup = () => fsp.unlink(outputPath).catch(() => {});
+    stream.on("error", async () => { await cleanup(); if (!res.headersSent) res.status(500).end(); else res.destroy(); });
+    stream.on("close", cleanup);
+    return stream.pipe(res);
+  } catch (nativeErr) {
+    await fsp.unlink(outputPath).catch(() => {});
+    console.error(`[download] Dailymotion ${id}: native FFmpeg failed: ${nativeErr?.message || nativeErr}`);
+    if (res.headersSent) throw nativeErr;
+    try {
+      return await runYtdlpDmFallback(id, q, filename, res);
+    } catch (fallbackErr) {
+      throw new Error(`Dailymotion native failed: ${nativeErr?.message || nativeErr}; fallback failed: ${fallbackErr?.message || fallbackErr}`);
+    }
+  }
 }
 
 app.get("/api/download", rateLimit(50, 10 * 60 * 1000), async (req, res) => {
@@ -434,20 +347,15 @@ app.get("/api/download", rateLimit(50, 10 * 60 * 1000), async (req, res) => {
       if (!id) throw new Error("Missing Dailymotion video ID.");
       return await downloadDm(id, String(req.query.quality || "auto"), String(req.query.name || ""), res);
     }
-
     const rawUrl = String(req.query.url || "").trim();
     if (!rawUrl) throw new Error("Missing media URL.");
     await validateUrl(rawUrl);
-
     if (mode === "direct") return await proxyDirect(rawUrl, res);
     if (mode === "generic") {
       const h = Math.max(144, Math.min(2160, Number(req.query.height || 720)));
-      const selector = `bv*[height<=${h}][ext=mp4]+ba[ext=m4a]/b[height<=${h}][ext=mp4]/b[height<=${h}]`;
-      return await runYtdlpToFile(rawUrl, selector, "mp4", String(req.query.name || ""), res);
+      return runYtdlpToFile(rawUrl, `bv*[height<=${h}][ext=mp4]+ba[ext=m4a]/b[height<=${h}][ext=mp4]/b[height<=${h}]`, "mp4", String(req.query.name || ""), res);
     }
-    if (mode === "generic-audio") {
-      return await runYtdlpToFile(rawUrl, "ba[ext=m4a]/ba", "m4a", String(req.query.name || ""), res);
-    }
+    if (mode === "generic-audio") return runYtdlpToFile(rawUrl, "ba[ext=m4a]/ba", "m4a", String(req.query.name || ""), res);
     throw new Error("Invalid download mode.");
   } catch (err) {
     console.error(`[download] ${mode}:`, err?.message || err);
@@ -457,4 +365,4 @@ app.get("/api/download", rateLimit(50, 10 * 60 * 1000), async (req, res) => {
 });
 
 app.use((req, res) => res.status(404).json({ ok: false, error: "Not found." }));
-app.listen(PORT, "0.0.0.0", () => console.log(`NeonFetch X v3 listening on 0.0.0.0:${PORT}`));
+app.listen(PORT, "0.0.0.0", () => console.log(`NeonFetch X v3.1 listening on 0.0.0.0:${PORT}`));
