@@ -2,12 +2,17 @@ import express from "express";
 import dns from "node:dns/promises";
 import net from "node:net";
 import path from "node:path";
+import os from "node:os";
+import fs from "node:fs";
+import { promises as fsp } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
+import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const youtubedl = require("youtube-dl-exec");
+const ffmpegPath = require("ffmpeg-static");
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,7 +20,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const MAX_BYTES = 500 * 1024 * 1024;
-const MAX_FORMATS = 14;
+const MAX_FORMATS = 18;
 
 app.disable("x-powered-by");
 app.use(express.json({ limit: "32kb" }));
@@ -35,7 +40,9 @@ function rateLimit(limit, windowMs) {
     if (!entry || now > entry.reset) entry = { count: 0, reset: now + windowMs };
     entry.count += 1;
     buckets.set(key, entry);
-    if (entry.count > limit) return res.status(429).json({ ok: false, error: "Too many requests. Try again shortly." });
+    if (entry.count > limit) {
+      return res.status(429).json({ ok: false, error: "Too many requests. Try again shortly." });
+    }
     next();
   };
 }
@@ -48,15 +55,57 @@ app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
 app.get("/favicon.svg", (req, res) => res.sendFile(path.join(__dirname, "favicon.svg")));
 
 app.get("/api/health", (req, res) => {
-  res.json({ ok: true, service: "NeonFetch X", mode: "public-media", extractor: "yt-dlp", storage: "ephemeral", timestamp: new Date().toISOString() });
+  res.json({
+    ok: true,
+    service: "NeonFetch X",
+    mode: "authorized-public-media",
+    extractor: "yt-dlp",
+    ffmpeg: Boolean(ffmpegPath),
+    storage: "temporary-ephemeral",
+    timestamp: new Date().toISOString()
+  });
 });
 
 const allowedContentPrefixes = ["video/", "audio/", "image/", "application/octet-stream"];
-const blockedHostFragments = [
-  "localhost",
-  "metadata.google.internal",
-  "169.254.169.254"
-];
+const blockedHostFragments = ["localhost", "metadata.google.internal", "169.254.169.254"];
+
+const QUALITY_PRESETS = {
+  q2160: {
+    label: "4K / 2160p",
+    ext: "mp4",
+    selector: "bv*[height<=2160][ext=mp4]+ba[ext=m4a]/b[height<=2160][ext=mp4]/b[height<=2160]"
+  },
+  q1440: {
+    label: "1440p",
+    ext: "mp4",
+    selector: "bv*[height<=1440][ext=mp4]+ba[ext=m4a]/b[height<=1440][ext=mp4]/b[height<=1440]"
+  },
+  q1080: {
+    label: "1080p",
+    ext: "mp4",
+    selector: "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/b[height<=1080]"
+  },
+  q720: {
+    label: "720p",
+    ext: "mp4",
+    selector: "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4]/b[height<=720]"
+  },
+  q480: {
+    label: "480p",
+    ext: "mp4",
+    selector: "bv*[height<=480][ext=mp4]+ba[ext=m4a]/b[height<=480][ext=mp4]/b[height<=480]"
+  },
+  q360: {
+    label: "360p",
+    ext: "mp4",
+    selector: "bv*[height<=360][ext=mp4]+ba[ext=m4a]/b[height<=360][ext=mp4]/b[height<=360]"
+  },
+  audio: {
+    label: "Best audio",
+    ext: "m4a",
+    selector: "ba[ext=m4a]/ba"
+  }
+};
 
 function isPrivateIp(ip) {
   if (!ip) return true;
@@ -91,7 +140,11 @@ function safeFilename(input, contentType = "", title = "") {
     const fromUrl = decodeURIComponent(path.basename(u.pathname));
     if (!title && fromUrl) base = fromUrl;
   } catch {}
-  base = String(base).replace(/[^a-zA-Z0-9._ -]/g, "_").replace(/\s+/g, " ").trim().slice(0, 100) || "download";
+  base = String(base)
+    .replace(/[^a-zA-Z0-9._ -]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 100) || "download";
   if (!path.extname(base)) {
     const extMap = {
       "video/mp4": ".mp4", "video/webm": ".webm", "video/quicktime": ".mov",
@@ -115,10 +168,19 @@ function formatBytes(n) {
 async function fetchHeadOrProbe(url) {
   let response;
   try {
-    response = await fetch(url, { method: "HEAD", redirect: "follow", signal: AbortSignal.timeout(10000) });
+    response = await fetch(url, {
+      method: "HEAD",
+      redirect: "follow",
+      signal: AbortSignal.timeout(10000)
+    });
   } catch {}
   if (!response?.ok || !response.headers.get("content-type")) {
-    response = await fetch(url, { method: "GET", redirect: "follow", headers: { Range: "bytes=0-0" }, signal: AbortSignal.timeout(10000) });
+    response = await fetch(url, {
+      method: "GET",
+      redirect: "follow",
+      headers: { Range: "bytes=0-0" },
+      signal: AbortSignal.timeout(10000)
+    });
   }
   return response;
 }
@@ -155,7 +217,55 @@ function normalizeInfo(output) {
   return output;
 }
 
-function chooseFormats(info, rawUrl) {
+function makePresetFormats(info, rawUrl) {
+  const source = Array.isArray(info.formats) ? info.formats : [];
+  const usableVideo = source.filter(f => f?.url && !f.has_drm && f.vcodec && f.vcodec !== "none");
+  const usableAudio = source.some(f => f?.url && !f.has_drm && f.acodec && f.acodec !== "none");
+  const heights = usableVideo.map(f => Number(f.height || 0)).filter(Boolean);
+  const maxHeight = heights.length ? Math.max(...heights) : 0;
+  const filenameBase = safeFilename(rawUrl, "", info.title || "media").replace(/\.[^.]+$/, "");
+  const presets = [];
+
+  const candidates = [
+    [2160, "q2160"],
+    [1440, "q1440"],
+    [1080, "q1080"],
+    [720, "q720"],
+    [480, "q480"],
+    [360, "q360"]
+  ];
+
+  if (usableAudio) {
+    for (const [height, id] of candidates) {
+      if (maxHeight < height) continue;
+      const preset = QUALITY_PRESETS[id];
+      presets.push({
+        id,
+        label: preset.label,
+        quality: preset.label,
+        ext: preset.ext,
+        size: null,
+        type: "video",
+        downloadUrl: `/api/download?mode=preset&url=${encodeURIComponent(rawUrl)}&preset=${id}&name=${encodeURIComponent(`${filenameBase} - ${preset.label}.${preset.ext}`)}`
+      });
+    }
+
+    const audioPreset = QUALITY_PRESETS.audio;
+    presets.push({
+      id: "audio",
+      label: audioPreset.label,
+      quality: "Audio",
+      ext: audioPreset.ext,
+      size: null,
+      type: "audio",
+      downloadUrl: `/api/download?mode=preset&url=${encodeURIComponent(rawUrl)}&preset=audio&name=${encodeURIComponent(`${filenameBase} - audio.${audioPreset.ext}`)}`
+    });
+  }
+
+  return presets;
+}
+
+function chooseNativeFormats(info, rawUrl) {
   const source = Array.isArray(info.formats) ? info.formats : [];
   const clean = source.filter(f => {
     if (!f?.format_id || !f?.url || f.has_drm) return false;
@@ -173,7 +283,9 @@ function chooseFormats(info, rawUrl) {
     const h = Number(f.height || 0);
     const ext = String(f.ext || "mp4").toLowerCase();
     const size = Number(f.filesize || f.filesize_approx || 0);
-    const quality = hasVideo ? (h ? `${h}p` : String(f.format_note || "Video")) : `${Math.round(Number(f.abr || f.tbr || 0)) || ""} kbps`.trim();
+    const quality = hasVideo
+      ? (h ? `${h}p` : String(f.format_note || "Video"))
+      : `${Math.round(Number(f.abr || f.tbr || 0)) || ""} kbps`.trim();
     const key = `${hasVideo ? "v" : "a"}:${quality}:${ext}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -193,7 +305,19 @@ function chooseFormats(info, rawUrl) {
 
   video.sort((a, b) => parseInt(b.quality) - parseInt(a.quality));
   audio.sort((a, b) => parseInt(b.quality) - parseInt(a.quality));
-  return [...video.slice(0, 10), ...audio.slice(0, 4)].slice(0, MAX_FORMATS);
+  return [...video.slice(0, 8), ...audio.slice(0, 3)];
+}
+
+function chooseFormats(info, rawUrl) {
+  const presets = makePresetFormats(info, rawUrl);
+  const native = chooseNativeFormats(info, rawUrl);
+  const seen = new Set();
+  return [...presets, ...native].filter(item => {
+    const key = `${item.type}:${item.label}:${item.ext}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, MAX_FORMATS);
 }
 
 async function inspectWithExtractor(rawUrl) {
@@ -203,20 +327,32 @@ async function inspectWithExtractor(rawUrl) {
     noPlaylist: true,
     noWarnings: true,
     quiet: true,
+    ffmpegLocation: ffmpegPath || undefined,
     socketTimeout: 15,
     retries: 1,
     fragmentRetries: 1
-  }, { timeout: 30000 });
+  }, { timeout: 35000 });
 
   const info = normalizeInfo(output);
-  if (info?._type === "playlist" || Array.isArray(info?.entries)) throw new Error("Playlists and bulk downloads are not supported.");
+  if (info?._type === "playlist" || Array.isArray(info?.entries)) {
+    throw new Error("Playlists and bulk downloads are not supported.");
+  }
+
   const availability = String(info?.availability || "public").toLowerCase();
-  if (["private", "premium_only", "subscriber_only", "needs_auth"].includes(availability)) throw new Error("Private, paid, subscriber-only, or login-required media is not supported.");
-  if (info?.is_live || ["is_live", "is_upcoming"].includes(String(info?.live_status || ""))) throw new Error("Live streams are not supported. Try again after the stream is published as a normal video.");
-  if (Number(info?.age_limit || 0) >= 18) throw new Error("Age-restricted media is not supported.");
+  if (["private", "premium_only", "subscriber_only", "needs_auth"].includes(availability)) {
+    throw new Error("Private, paid, subscriber-only, or login-required media is not supported.");
+  }
+  if (info?.is_live || ["is_live", "is_upcoming"].includes(String(info?.live_status || ""))) {
+    throw new Error("Live streams are not supported. Try again after the stream is published as a normal video.");
+  }
+  if (Number(info?.age_limit || 0) >= 18) {
+    throw new Error("Age-restricted media is not supported without an official authenticated workflow.");
+  }
 
   const formats = chooseFormats(info, rawUrl);
-  if (!formats.length) throw new Error("No downloadable public video/audio format was found without DRM or account access.");
+  if (!formats.length) {
+    throw new Error("No downloadable non-DRM video/audio format was found without account access.");
+  }
 
   return {
     ok: true,
@@ -251,6 +387,56 @@ app.post("/api/inspect", rateLimit(20, 10 * 60 * 1000), async (req, res) => {
   }
 });
 
+function contentTypeForExt(ext) {
+  const map = {
+    mp4: "video/mp4",
+    webm: "video/webm",
+    mov: "video/quicktime",
+    m4a: "audio/mp4",
+    mp3: "audio/mpeg",
+    ogg: "audio/ogg",
+    wav: "audio/wav"
+  };
+  return map[String(ext).toLowerCase()] || "application/octet-stream";
+}
+
+async function downloadPresetToTemp(url, presetId) {
+  const preset = QUALITY_PRESETS[presetId];
+  if (!preset) throw new Error("Invalid quality preset.");
+
+  const token = `neonfetch-${randomUUID()}`;
+  const template = path.join(os.tmpdir(), `${token}.%(ext)s`);
+
+  await youtubedl(url, {
+    format: preset.selector,
+    output: template,
+    noPlaylist: true,
+    noWarnings: true,
+    quiet: true,
+    ffmpegLocation: ffmpegPath || undefined,
+    mergeOutputFormat: presetId === "audio" ? undefined : "mp4",
+    maxFilesize: "500M",
+    socketTimeout: 25,
+    retries: 1,
+    fragmentRetries: 1,
+    concurrentFragments: 2
+  }, { timeout: 180000 });
+
+  const files = (await fsp.readdir(os.tmpdir()))
+    .filter(name => name.startsWith(token + "."))
+    .map(name => path.join(os.tmpdir(), name));
+
+  if (!files.length) throw new Error("The selected quality could not be prepared.");
+  const filePath = files[0];
+  const stat = await fsp.stat(filePath);
+  if (stat.size > MAX_BYTES) {
+    await Promise.all(files.map(file => fsp.unlink(file).catch(() => {})));
+    throw new Error("Prepared file is larger than the 500 MB limit.");
+  }
+
+  return { filePath, cleanupFiles: files, ext: path.extname(filePath).slice(1) || preset.ext };
+}
+
 app.get("/api/download", rateLimit(40, 10 * 60 * 1000), async (req, res) => {
   const mode = String(req.query.mode || "");
   const rawUrl = String(req.query.url || "").trim();
@@ -259,7 +445,11 @@ app.get("/api/download", rateLimit(40, 10 * 60 * 1000), async (req, res) => {
     const u = await validateUrl(rawUrl);
 
     if (mode === "direct") {
-      const upstream = await fetch(u, { method: "GET", redirect: "follow", signal: AbortSignal.timeout(30000) });
+      const upstream = await fetch(u, {
+        method: "GET",
+        redirect: "follow",
+        signal: AbortSignal.timeout(30000)
+      });
       if (!upstream.ok) throw new Error(`Remote server returned ${upstream.status}.`);
       const meta = directMediaMeta(upstream, rawUrl);
       if (!meta) throw new Error("The URL is not a direct media file.");
@@ -271,13 +461,43 @@ app.get("/api/download", rateLimit(40, 10 * 60 * 1000), async (req, res) => {
       return Readable.fromWeb(upstream.body).on("error", () => res.destroy()).pipe(res);
     }
 
+    if (mode === "preset") {
+      const presetId = String(req.query.preset || "");
+      const preset = QUALITY_PRESETS[presetId];
+      if (!preset) throw new Error("Invalid quality preset.");
+
+      const requestedName = String(req.query.name || `media.${preset.ext}`)
+        .replace(/[\r\n"\\/]/g, "_")
+        .slice(0, 140);
+
+      const prepared = await downloadPresetToTemp(u.href, presetId);
+      const finalExt = prepared.ext || preset.ext;
+      const baseName = requestedName.replace(/\.[^.]+$/, "");
+      const finalName = `${baseName}.${finalExt}`;
+
+      res.setHeader("Content-Type", contentTypeForExt(finalExt));
+      res.setHeader("Content-Disposition", `attachment; filename="${finalName}"`);
+      res.setHeader("Content-Length", String((await fsp.stat(prepared.filePath)).size));
+      res.setHeader("Cache-Control", "no-store");
+
+      const stream = fs.createReadStream(prepared.filePath);
+      const cleanup = () => Promise.all(prepared.cleanupFiles.map(file => fsp.unlink(file).catch(() => {})));
+      stream.on("error", async () => {
+        await cleanup();
+        if (!res.headersSent) res.status(500).end();
+        else res.destroy();
+      });
+      stream.on("close", cleanup);
+      return stream.pipe(res);
+    }
+
     if (mode !== "extract") throw new Error("Invalid download mode.");
     const formatId = String(req.query.format || "");
     if (!/^[a-zA-Z0-9._+-]{1,80}$/.test(formatId)) throw new Error("Invalid format selection.");
     const ext = String(req.query.ext || "mp4").replace(/[^a-zA-Z0-9]/g, "").slice(0, 8) || "mp4";
     const name = String(req.query.name || `media.${ext}`).replace(/[\r\n"\\/]/g, "_").slice(0, 140);
 
-    res.setHeader("Content-Type", "application/octet-stream");
+    res.setHeader("Content-Type", contentTypeForExt(ext));
     res.setHeader("Content-Disposition", `attachment; filename="${name || `media.${ext}`}"`);
     res.setHeader("Cache-Control", "no-store");
 
@@ -287,6 +507,7 @@ app.get("/api/download", rateLimit(40, 10 * 60 * 1000), async (req, res) => {
       noPlaylist: true,
       noWarnings: true,
       quiet: true,
+      ffmpegLocation: ffmpegPath || undefined,
       socketTimeout: 20,
       retries: 1,
       fragmentRetries: 1,
@@ -294,15 +515,20 @@ app.get("/api/download", rateLimit(40, 10 * 60 * 1000), async (req, res) => {
     });
 
     let errText = "";
-    child.stderr?.on("data", chunk => { if (errText.length < 4000) errText += chunk.toString(); });
+    child.stderr?.on("data", chunk => {
+      if (errText.length < 4000) errText += chunk.toString();
+    });
     child.on("error", err => {
       if (!res.headersSent) res.status(502).json({ ok: false, error: err.message || "Download failed." });
       else res.destroy();
     });
     child.on("close", code => {
       if (code && !res.writableEnded) {
-        if (!res.headersSent) res.status(502).json({ ok: false, error: errText.trim() || "The selected media format could not be downloaded." });
-        else res.end();
+        if (!res.headersSent) {
+          res.status(502).json({ ok: false, error: errText.trim() || "The selected media format could not be downloaded." });
+        } else {
+          res.end();
+        }
       }
     });
     req.on("close", () => { try { child.kill("SIGKILL"); } catch {} });
