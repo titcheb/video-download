@@ -4,11 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#050713">
-  <meta name="description" content="NeonFetch X is a futuristic browser-based tool for opening or downloading direct media files that you own or are authorized to save.">
+  <meta name="description" content="NeonFetch X is a futuristic direct-media download interface for files you own or are authorized to download.">
   <meta name="robots" content="index,follow">
-  <link rel="canonical" href="https://titcheb.github.io/video-download/">
   <meta property="og:title" content="NeonFetch X — Direct Media Engine">
-  <meta property="og:description" content="Fast, private and high-tech direct media handling in your browser.">
+  <meta property="og:description" content="Fast, private and high-tech direct media handling.">
   <title>NeonFetch X — Direct Media Engine</title>
   <style>
     :root{--bg:#050713;--panel:rgba(10,16,35,.72);--line:rgba(118,231,255,.14);--cyan:#76e7ff;--violet:#8b5cf6;--text:#f5f8ff;--muted:#8290ad;--ok:#5df2b4;--danger:#ff7187;--shadow:0 25px 90px rgba(0,0,0,.5)}
@@ -30,54 +29,78 @@
 
   <main id="top">
     <section class="hero shell">
-      <div class="micro"><span>NF-X / STATIC BUILD</span><i></i><span>GITHUB PAGES READY</span></div>
+      <div class="micro"><span>NF-X / SERVER BUILD</span><i></i><span>RENDER READY</span></div>
       <h1>MEDIA IN.<br><span class="grad">FILE OUT.</span></h1>
-      <p class="lead">A futuristic browser-based interface for direct media-file URLs. No account, no upload queue, and no server-side file storage.</p>
-      <div class="metrics"><div class="metric"><strong>&lt; 1s</strong><span>UI RESPONSE</span></div><div class="metric"><strong>LOCAL</strong><span>URL PROCESSING</span></div><div class="metric"><strong>0</strong><span>FILES STORED</span></div></div>
+      <p class="lead">A futuristic direct-media interface backed by a Node.js service. Inspect eligible media URLs and stream authorized files through the download endpoint.</p>
+      <div class="metrics"><div class="metric"><strong>NODE</strong><span>RENDER WEB SERVICE</span></div><div class="metric"><strong>500 MB</strong><span>DEMO LIMIT</span></div><div class="metric"><strong>0</strong><span>FILES STORED</span></div></div>
     </section>
 
     <section class="engine shell" id="engine">
       <div class="frame"><div class="console">
-        <div class="console-head"><strong>NEONFETCH / INGEST CONSOLE</strong><span class="secure">DIRECT MODE</span></div>
+        <div class="console-head"><strong>NEONFETCH / INGEST CONSOLE</strong><span class="secure">SERVER INSPECTION</span></div>
         <label class="label" for="urlInput">DIRECT MEDIA SOURCE URL</label>
         <div class="input-row">
           <div class="input-wrap"><span class="proto">HTTPS</span><input id="urlInput" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://example.com/media/video.mp4"><button id="pasteBtn" class="ghost" type="button">PASTE</button><button id="clearBtn" class="ghost" type="button" hidden>CLEAR</button></div>
           <button id="scanBtn" class="scan-btn" type="button">INITIALIZE SCAN</button>
         </div>
-        <div class="formats"><span>DIRECT FILES</span><span>MP4</span><span>WEBM</span><span>MOV</span><span>M4V</span><span>MP3</span><span>M4A</span><span>WAV</span><span>OGG</span><span>JPG</span><span>PNG</span><span>WEBP</span></div>
+        <div class="formats"><span>DIRECT FILES</span><span>MP4</span><span>WEBM</span><span>MOV</span><span>MP3</span><span>M4A</span><span>WAV</span><span>OGG</span><span>JPG</span><span>PNG</span><span>WEBP</span></div>
 
-        <div class="scan" id="scanPanel"><div class="scan-top"><span id="scanText">Parsing source URL...</span><strong id="scanPercent">0%</strong></div><div class="track"><div class="bar" id="scanBar"></div></div><div class="steps"><span id="s1">PARSE URL</span><span id="s2">CHECK HOST</span><span id="s3">VERIFY FORMAT</span><span id="s4">BUILD LINK</span></div></div>
+        <div class="scan" id="scanPanel"><div class="scan-top"><span id="scanText">Parsing source URL...</span><strong id="scanPercent">0%</strong></div><div class="track"><div class="bar" id="scanBar"></div></div><div class="steps"><span id="s1">PARSE URL</span><span id="s2">CHECK HOST</span><span id="s3">INSPECT MEDIA</span><span id="s4">BUILD ROUTE</span></div></div>
 
-        <div class="result" id="result"><div><strong id="filename">media.mp4</strong><small id="meta">Direct file URL ready</small></div><a class="download" id="downloadBtn" href="#" rel="noopener noreferrer">DOWNLOAD / OPEN ↗</a></div>
+        <div class="result" id="result"><div><strong id="filename">media.mp4</strong><small id="meta">Direct file ready</small></div><a class="download" id="downloadBtn" href="#">DOWNLOAD FILE ↓</a></div>
         <div class="error" id="error"><strong>SCAN INTERRUPTED</strong><div id="errorText"></div></div>
-        <p class="fine">NeonFetch X does not bypass DRM, paywalls, authentication, subscription controls, or platform protections. Some remote servers may open the file in a new tab instead of forcing a download.</p>
+        <p class="fine">NeonFetch X does not bypass DRM, paywalls, authentication, subscription controls, or platform protections. Use only media you own or are authorized to download.</p>
       </div></div>
     </section>
 
-    <section class="info shell" id="features"><div class="eyebrow">ENGINE ARCHITECTURE</div><h2 class="section-title">Designed like a tool.<br>Not an ad maze.</h2><p class="section-copy">This GitHub Pages build works entirely in the browser. It validates the direct URL you enter and prepares the browser to open or save that file.</p>
-      <div class="cards"><article class="card"><div class="num">01 / FAST</div><h3>Instant validation</h3><p>No backend round-trip is required. URL checks and download-link preparation happen locally.</p></article><article class="card"><div class="num">02 / PRIVATE</div><h3>No upload step</h3><p>Your media is not uploaded to this website. The browser uses the direct address you provide.</p></article><article class="card"><div class="num">03 / RESPONSIVE</div><h3>Built for every screen</h3><p>The interface adapts from mobile devices to large desktop displays while keeping the same workflow.</p></article></div>
+    <section class="info shell" id="features"><div class="eyebrow">ENGINE ARCHITECTURE</div><h2 class="section-title">Built for Render.<br>Frontend + API together.</h2><p class="section-copy">The Express server serves this interface, validates remote media responses, and exposes the same-origin inspection and download endpoints.</p>
+      <div class="cards"><article class="card"><div class="num">01 / INSPECT</div><h3>Server-side media check</h3><p>The API checks the URL, host and returned content type before preparing a download route.</p></article><article class="card"><div class="num">02 / STREAM</div><h3>Ephemeral streaming</h3><p>Eligible media is piped to the browser without building a permanent media library on the service.</p></article><article class="card"><div class="num">03 / RESPONSIVE</div><h3>Built for every screen</h3><p>The interface adapts from mobile devices to large desktop displays while keeping the same workflow.</p></article></div>
     </section>
 
-    <section class="info shell" id="usage"><div class="eyebrow">RESPONSIBLE USE</div><h2 class="section-title">Only save media you can legally download.</h2><p class="section-copy">Use NeonFetch X for your own files, public-domain media, creator-provided downloads, or content for which you have explicit authorization.</p><div class="notice">Platform page URLs such as YouTube, Dailymotion, Vimeo and TikTok are not direct media files and are intentionally rejected. This build does not extract protected streams or circumvent access controls.</div></section>
+    <section class="info shell" id="usage"><div class="eyebrow">RESPONSIBLE USE</div><h2 class="section-title">Only save media you can legally download.</h2><p class="section-copy">Use NeonFetch X for your own files, public-domain media, creator-provided downloads, or content for which you have explicit authorization.</p><div class="notice">Platform page URLs such as YouTube, Dailymotion, Vimeo and TikTok are intentionally rejected. This build does not extract protected streams or circumvent access controls.</div></section>
 
-    <section class="info shell" id="faq"><div class="eyebrow">FAQ / POLICY</div><h2 class="section-title">Know the boundaries.</h2><div class="faq"><details open><summary>What kind of URL works?</summary><p>A direct HTTP or HTTPS URL ending in a supported media extension such as .mp4, .webm, .mov, .mp3, .wav, .jpg or .png.</p></details><details><summary>Why does a normal video-platform page fail?</summary><p>A platform webpage is not the direct media file. NeonFetch X intentionally avoids stream extraction, DRM circumvention and platform-protection bypasses.</p></details><details><summary>Why might the file open instead of downloading?</summary><p>The remote server controls its response headers. For cross-origin resources, browsers may ignore the HTML download hint and open the media instead.</p></details></div></section>
+    <section class="info shell" id="faq"><div class="eyebrow">FAQ / POLICY</div><h2 class="section-title">Know the boundaries.</h2><div class="faq"><details open><summary>What kind of URL works?</summary><p>A direct HTTP or HTTPS media URL whose server returns a supported video, audio, image, or generic binary content type.</p></details><details><summary>Why does a normal video-platform page fail?</summary><p>A platform webpage is not the direct media file. NeonFetch X intentionally avoids stream extraction, DRM circumvention and platform-protection bypasses.</p></details><details><summary>Where is the file stored?</summary><p>The app is designed to stream eligible files to the browser and does not intentionally keep permanent downloaded copies on the Render service.</p></details></div></section>
   </main>
 
-  <footer class="footer shell"><div><b>NEONFETCH X</b><br>DIRECT MEDIA ENGINE</div><div>Use only for media you own or are authorized to download.</div><div>BUILD 3.0 · <span id="year"></span></div></footer>
+  <footer class="footer shell"><div><b>NEONFETCH X</b><br>DIRECT MEDIA ENGINE</div><div>Use only for media you own or are authorized to download.</div><div>RENDER BUILD · <span id="year"></span></div></footer>
   <div class="orb"></div>
 
   <script>
     const $=id=>document.getElementById(id),input=$('urlInput'),scanBtn=$('scanBtn'),pasteBtn=$('pasteBtn'),clearBtn=$('clearBtn'),scan=$('scanPanel'),bar=$('scanBar'),percent=$('scanPercent'),scanText=$('scanText'),result=$('result'),error=$('error'),errorText=$('errorText'),downloadBtn=$('downloadBtn'),filename=$('filename'),meta=$('meta');
     $('year').textContent=new Date().getFullYear();
-    const allowed=['mp4','webm','mov','m4v','mp3','m4a','wav','ogg','jpg','jpeg','png','webp','gif'];
-    const blocked=['youtube.com','youtu.be','dailymotion.com','dai.ly','vimeo.com','tiktok.com'];
     let timer;
+
+    function formatBytes(n){if(!n)return'size unknown';const u=['B','KB','MB','GB'];let i=0,v=n;while(v>=1024&&i<u.length-1){v/=1024;i++}return`${v.toFixed(v>=10||i===0?0:1)} ${u[i]}`}
     function reset(){clearInterval(timer);scan.classList.remove('show');result.classList.remove('show');error.classList.remove('show');bar.style.width='0%';percent.textContent='0%';['s1','s2','s3','s4'].forEach(id=>$(id).className='')}
     function fail(msg){result.classList.remove('show');errorText.textContent=msg;error.classList.add('show')}
-    function extension(path){const clean=path.split('?')[0].split('#')[0],last=clean.split('/').pop()||'',ext=last.includes('.')?last.split('.').pop().toLowerCase():'';return{last,ext}}
-    function animate(done){scan.classList.add('show');const phases=[{p:18,t:'Parsing source URL...',id:'s1'},{p:42,t:'Checking source host...',id:'s2'},{p:68,t:'Verifying media format...',id:'s3'},{p:91,t:'Building direct browser link...',id:'s4'}];let i=0;clearInterval(timer);timer=setInterval(()=>{if(i>=phases.length){clearInterval(timer);done();return}const x=phases[i++];bar.style.width=x.p+'%';percent.textContent=x.p+'%';scanText.textContent=x.t;['s1','s2','s3','s4'].forEach((id,n)=>{$(id).className=n<i-1?'done':n===i-1?'on':''})},260)}
-    function analyze(){reset();const raw=input.value.trim();if(!raw){fail('Paste a direct media-file URL first.');return}let u;try{u=new URL(raw)}catch{fail('The address is not a valid URL.');return}if(!['http:','https:'].includes(u.protocol)){fail('Only HTTP and HTTPS URLs are supported.');return}const host=u.hostname.toLowerCase();if(blocked.some(x=>host===x||host.endsWith('.'+x))){fail('Platform webpage URLs are not supported. Use only a direct media-file URL that you are authorized to download.');return}const f=extension(u.pathname);if(!f.ext||!allowed.includes(f.ext)){fail('This does not look like a supported direct media file. Try a URL ending in .mp4, .webm, .mov, .mp3, .wav, .jpg, .png or another supported format.');return}scanBtn.disabled=true;scanBtn.textContent='SCANNING SOURCE';animate(()=>{bar.style.width='100%';percent.textContent='100%';scanText.textContent='Direct media route ready.';['s1','s2','s3','s4'].forEach(id=>$(id).className='done');filename.textContent=decodeURIComponent(f.last||('media.'+f.ext));meta.textContent=f.ext.toUpperCase()+' · direct media URL';downloadBtn.href=u.href;downloadBtn.setAttribute('download',decodeURIComponent(f.last||('media.'+f.ext)));result.classList.add('show');scanBtn.disabled=false;scanBtn.textContent='INITIALIZE SCAN';setTimeout(()=>scan.classList.remove('show'),650)})}
-    scanBtn.addEventListener('click',analyze);input.addEventListener('keydown',e=>{if(e.key==='Enter')analyze()});input.addEventListener('input',()=>{clearBtn.hidden=!input.value.trim();result.classList.remove('show');error.classList.remove('show')});pasteBtn.addEventListener('click',async()=>{try{input.value=(await navigator.clipboard.readText()).trim();clearBtn.hidden=!input.value;input.focus()}catch{fail('Clipboard permission was blocked. Paste the URL manually.')}});clearBtn.addEventListener('click',()=>{input.value='';clearBtn.hidden=true;reset();input.focus()});
+    function startScan(){scan.classList.add('show');const phases=[{p:16,t:'Parsing source URL...'},{p:38,t:'Validating remote host...'},{p:61,t:'Inspecting media headers...'},{p:82,t:'Preparing secure download route...'}];let i=0;clearInterval(timer);timer=setInterval(()=>{if(i>=phases.length){clearInterval(timer);return}const x=phases[i++];bar.style.width=x.p+'%';percent.textContent=x.p+'%';scanText.textContent=x.t;['s1','s2','s3','s4'].forEach((id,n)=>{$(id).className=n<i-1?'done':n===i-1?'on':''})},330)}
+    function finish(){clearInterval(timer);bar.style.width='100%';percent.textContent='100%';scanText.textContent='Inspection complete. Download route ready.';['s1','s2','s3','s4'].forEach(id=>$(id).className='done');setTimeout(()=>scan.classList.remove('show'),700)}
+
+    async function analyze(){
+      reset();
+      const url=input.value.trim();
+      if(!url){fail('Paste a direct media-file URL first.');return}
+      try{new URL(url)}catch{fail('The address is not a valid URL.');return}
+
+      scanBtn.disabled=true;scanBtn.textContent='SCANNING SOURCE';startScan();
+      try{
+        const response=await fetch('/api/inspect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});
+        let data={};
+        try{data=await response.json()}catch{}
+        if(!response.ok||!data.ok)throw new Error(data.error||'Could not inspect this media source.');
+        finish();
+        filename.textContent=data.filename||'download';
+        meta.textContent=`${data.contentType||'media'} · ${formatBytes(data.size)}`;
+        downloadBtn.href=data.downloadUrl;
+        result.classList.add('show');
+      }catch(err){clearInterval(timer);scan.classList.remove('show');fail(err.message||'Unable to inspect the media source.')}finally{scanBtn.disabled=false;scanBtn.textContent='INITIALIZE SCAN'}
+    }
+
+    scanBtn.addEventListener('click',analyze);
+    input.addEventListener('keydown',e=>{if(e.key==='Enter')analyze()});
+    input.addEventListener('input',()=>{clearBtn.hidden=!input.value.trim();result.classList.remove('show');error.classList.remove('show')});
+    pasteBtn.addEventListener('click',async()=>{try{input.value=(await navigator.clipboard.readText()).trim();clearBtn.hidden=!input.value;input.focus()}catch{fail('Clipboard permission was blocked. Paste the URL manually.')}});
+    clearBtn.addEventListener('click',()=>{input.value='';clearBtn.hidden=true;reset();input.focus()});
   </script>
 </body>
 </html>
