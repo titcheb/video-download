@@ -1,12 +1,12 @@
 {
   "name": "neonfetch",
-  "version": "4.0.0",
+  "version": "5.0.0",
   "private": true,
   "description": "High-tech public media downloader for files you own or are authorized to download.",
   "type": "module",
   "scripts": {
-    "start": "node server-v4.js",
-    "dev": "node --watch server-v4.js"
+    "start": "node server-v5.js",
+    "dev": "node --watch server-v5.js"
   },
   "engines": {
     "node": ">=20"
