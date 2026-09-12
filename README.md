@@ -1,39 +1,75 @@
 # NeonFetch X — Direct Media Engine
 
-A responsive, high-tech browser interface for direct media-file URLs. This GitHub Pages build works entirely in the browser and does not require a Node.js backend.
+A responsive Node.js/Express web app for inspecting and streaming direct media-file URLs that you own or are authorized to download.
 
-## Live-site target
+## Deploy on Render
 
-Once GitHub Pages is enabled for this repository, the expected address is:
+This repository is ready to deploy as a **Render Web Service**.
 
-`https://titcheb.github.io/video-download/`
+### Recommended: Blueprint
+
+The repository includes `render.yaml`.
+
+In Render:
+
+1. Sign in with GitHub.
+2. Choose **New > Blueprint**.
+3. Select the GitHub repository `titcheb/video-download`.
+4. Render reads `render.yaml` automatically.
+5. Create the service.
+
+The Blueprint uses:
+
+- Runtime: Node
+- Plan: Free
+- Build command: `npm install`
+- Start command: `npm start`
+- Health check: `/api/health`
+- Auto deploy: enabled for commits
+
+### Manual Web Service setup
+
+If you create the service manually instead:
+
+- Repository: `titcheb/video-download`
+- Branch: `main`
+- Language/Runtime: `Node`
+- Build Command: `npm install`
+- Start Command: `npm start`
+- Health Check Path: `/api/health`
+
+Do not set a fixed port. Render supplies the `PORT` environment variable automatically and `server.js` listens on it.
 
 ## Features
 
-- High-tech responsive UI for mobile, tablet and desktop
-- Direct URL validation in the browser
-- Supported direct file formats include MP4, WEBM, MOV, M4V, MP3, M4A, WAV, OGG, JPG, PNG, WEBP and GIF
-- Animated scan workflow
-- Clipboard paste control
-- No account required
-- No file upload to this website
-- No server-side media storage
-- GitHub Pages compatible
+- High-tech responsive UI
+- Node.js + Express backend
+- `/api/inspect` media inspection endpoint
+- `/api/download` streaming download endpoint
+- `/api/health` health endpoint
+- Direct video, audio and image content support
+- No permanent media-file storage by design
+- 500 MB demo limit
+- Private/local network URL blocking
+- Major platform webpage URLs intentionally rejected
 
-## GitHub Pages
+## Local development
 
-Open the repository in GitHub and go to:
+Requires Node.js 18+.
 
-1. **Settings**
-2. **Pages**
-3. Under **Build and deployment**, choose **Deploy from a branch**
-4. Select branch **main** and folder **/(root)**
-5. Save
+```bash
+npm install
+npm start
+```
 
-GitHub will then publish the site at the URL above.
+Then open:
 
-## Important limitation
+```text
+http://localhost:3000
+```
 
-This static build handles direct media-file URLs. It does not extract video streams from platform webpages and does not bypass DRM, paywalls, authentication, subscription controls, or platform protections.
+## Responsible use
 
-Use only for files you own, public-domain media, creator-provided downloads, or media you are explicitly authorized to download.
+Use only for your own files, public-domain media, creator-provided downloads, or content you are explicitly authorized to download.
+
+The app does not intentionally bypass DRM, authentication, paywalls, subscription controls, or platform download restrictions.
