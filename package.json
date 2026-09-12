@@ -1,13 +1,14 @@
 {
   "name": "neonfetch",
-  "version": "5.2.0",
+  "version": "5.2.1",
   "private": true,
   "description": "High-tech public media downloader for files you own or are authorized to download.",
   "type": "module",
   "scripts": {
     "postinstall": "python3 -m pip install --disable-pip-version-check --no-cache-dir --target ./pydeps streamlink==8.5.0",
     "start": "node --import ./streamlink-dm-patch.mjs --import ./direct-link-patch.mjs server-v5.js",
-    "dev": "node --watch --import ./streamlink-dm-patch.mjs --import ./direct-link-patch.mjs server-v5.js"
+    "dev": "node --watch --import ./streamlink-dm-patch.mjs --import ./direct-link-patch.mjs server-v5.js",
+    "youtube-local": "node youtube-local.js"
   },
   "engines": {
     "node": ">=20.6"
