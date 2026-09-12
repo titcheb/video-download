@@ -1,41 +1,39 @@
-# NeonFetch X — High-Tech Direct Media Engine
+# NeonFetch X — Direct Media Engine
 
-A polished, futuristic, responsive direct-media downloader for files you own or are authorized to download.
+A responsive, high-tech browser interface for direct media-file URLs. This GitHub Pages build works entirely in the browser and does not require a Node.js backend.
 
-## Highlights
+## Live-site target
 
-- Premium high-tech UI with animated particle field, scan line, telemetry, orbit core and glass panels
-- Responsive design for mobile, tablet, desktop and ultrawide screens
-- Animated media inspection workflow
-- Direct-file support for common video/audio MIME types
-- Browser-local recent history (localStorage)
-- Clipboard paste / source copy controls
-- Glow-reduction toggle
-- Streaming backend with no permanent media-file storage
-- Basic SSRF/private-network protection
-- 500 MB demo limit
-- `/api/health` endpoint
-- Major platform pages (YouTube, Dailymotion, Vimeo, TikTok) intentionally blocked so this build does not bypass their download restrictions
+Once GitHub Pages is enabled for this repository, the expected address is:
 
-## Run locally
+`https://titcheb.github.io/video-download/`
 
-Requires Node.js 18+.
+## Features
 
-```bash
-npm install
-npm start
-```
+- High-tech responsive UI for mobile, tablet and desktop
+- Direct URL validation in the browser
+- Supported direct file formats include MP4, WEBM, MOV, M4V, MP3, M4A, WAV, OGG, JPG, PNG, WEBP and GIF
+- Animated scan workflow
+- Clipboard paste control
+- No account required
+- No file upload to this website
+- No server-side media storage
+- GitHub Pages compatible
 
-Open:
+## GitHub Pages
 
-```text
-http://localhost:3000
-```
+Open the repository in GitHub and go to:
 
-## Production hardening
+1. **Settings**
+2. **Pages**
+3. Under **Build and deployment**, choose **Deploy from a branch**
+4. Select branch **main** and folder **/(root)**
+5. Save
 
-Before public deployment, add a reverse proxy/HTTPS, rate limiting, request timeouts, stricter DNS rebinding protection, bandwidth quotas, monitoring, abuse prevention, and a privacy/terms page appropriate to your jurisdiction.
+GitHub will then publish the site at the URL above.
 
-## Usage
+## Important limitation
 
-Use only for media you own, public-domain media, or media you are explicitly authorized to download.
+This static build handles direct media-file URLs. It does not extract video streams from platform webpages and does not bypass DRM, paywalls, authentication, subscription controls, or platform protections.
+
+Use only for files you own, public-domain media, creator-provided downloads, or media you are explicitly authorized to download.
