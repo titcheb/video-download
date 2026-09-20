@@ -8,7 +8,8 @@ const require = createRequire(import.meta.url);
 const modulePath = require.resolve("youtube-dl-exec");
 const originalYtdlp = require(modulePath);
 
-const IG_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36";
+const DEFAULT_IG_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36";
+const IG_UA = String(process.env.INSTAGRAM_USER_AGENT || DEFAULT_IG_UA).trim();
 const PYDEPS = path.join(process.cwd(), "pydeps");
 
 function isInstagramUrl(rawUrl) {
@@ -23,7 +24,7 @@ function isInstagramUrl(rawUrl) {
 function normalizeCookieText(text) {
   const value = String(text || "").replace(/\\n/g, "\n").trim();
   if (!value) return "";
-  if (/^# Netscape HTTP Cookie File/m.test(value)) return `${value}\n`;
+  if (/^# (?:Netscape )?HTTP Cookie File/m.test(value)) return `${value}\n`;
   return `# Netscape HTTP Cookie File\n${value}\n`;
 }
 
@@ -62,7 +63,7 @@ function prepareCookieFile() {
   const filePath = path.join(os.tmpdir(), "nanofetch-instagram-cookies.txt");
   try {
     fs.writeFileSync(filePath, text, { encoding: "utf8", mode: 0o600 });
-    console.log("[instagram-auth] Authenticated Instagram cookies enabled.");
+    console.log(`[instagram-auth] Authenticated Instagram cookies enabled (UA=${IG_UA.slice(0, 72)}...).`);
     return filePath;
   } catch (err) {
     console.error(`[instagram-auth] Could not prepare cookie file: ${err?.message || err}`);
@@ -136,13 +137,13 @@ function runPythonYtdlp(url, flags = {}, options = {}) {
 function rewriteInstagramError(err) {
   const message = String(err?.stderr || err?.message || err || "");
   if (/failed to parse json|jsondecodeerror/i.test(message)) {
-    const wrapped = new Error("Instagram returned an invalid API response. NanoFetch retried with the current yt-dlp engine, but Instagram still rejected the request. Refresh the Instagram cookies if this continues.");
+    const wrapped = new Error("Instagram returned an invalid API response. Export fresh Instagram cookies in Netscape format, update INSTAGRAM_COOKIES_B64, and use the same browser User-Agent via INSTAGRAM_USER_AGENT.");
     wrapped.cause = err;
     return wrapped;
   }
   if (/empty media response|redirected to the login page|rate-?limit|login required|use --cookies|cookies-from-browser/i.test(message)) {
     const friendly = instagramCookieFile
-      ? "Instagram rejected the authenticated request. Export fresh Instagram cookies and update INSTAGRAM_COOKIES_B64, then retry."
+      ? "Instagram rejected the authenticated request. Export fresh Instagram cookies and update INSTAGRAM_COOKIES_B64; matching INSTAGRAM_USER_AGENT is also recommended."
       : "Instagram is rate-limiting anonymous server requests. Configure INSTAGRAM_COOKIES_B64 on the server.";
     const wrapped = new Error(friendly);
     wrapped.cause = err;
