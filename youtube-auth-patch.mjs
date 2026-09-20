@@ -117,8 +117,16 @@ function runPythonYtdlp(url, flags = {}, options = {}) {
   });
 }
 
+function errorText(err) {
+  return String(err?.stderr || err?.message || err || "");
+}
+
+function isPlayerAvailabilityError(err) {
+  return /video unavailable|page needs to be reloaded|playability status|this content isn.?t available|try again later/i.test(errorText(err));
+}
+
 function rewriteYouTubeError(err) {
-  const message = String(err?.stderr || err?.message || err || "");
+  const message = errorText(err);
   if (/sign in to confirm you.?re not a bot|confirm you.?re not a bot|login required|use --cookies|cookies-from-browser|authentication/i.test(message)) {
     const friendly = youtubeCookieFile
       ? "YouTube rejected the authenticated request. Export fresh YouTube cookies and update YOUTUBE_COOKIES_B64 in Render, then retry."
@@ -132,6 +140,11 @@ function rewriteYouTubeError(err) {
     wrapped.cause = err;
     return wrapped;
   }
+  if (isPlayerAvailabilityError(err)) {
+    const wrapped = new Error("YouTube reported this video as unavailable after NanoFetch retried alternate YouTube player clients. If the video plays in your browser, refresh YOUTUBE_COOKIES_B64 and YOUTUBE_USER_AGENT in Render.");
+    wrapped.cause = err;
+    return wrapped;
+  }
   return err;
 }
 
@@ -142,15 +155,45 @@ async function runYouTube(url, flags = {}, options = {}) {
     userAgent: flags.userAgent || userAgent,
     retries: Math.max(Number(flags.retries || 0), 3),
     fragmentRetries: Math.max(Number(flags.fragmentRetries || 0), 3),
-    extractorRetries: 3
+    extractorRetries: 3,
+    sleepRequests: flags.sleepRequests ?? 1
   };
 
   if (youtubeCookieFile) baseFlags.cookies = youtubeCookieFile;
 
   try {
     return await runPythonYtdlp(url, baseFlags, options);
-  } catch (err) {
-    throw rewriteYouTubeError(err);
+  } catch (firstErr) {
+    if (!isPlayerAvailabilityError(firstErr)) throw rewriteYouTubeError(firstErr);
+
+    // Logged-in yt-dlp sessions may select tv_downgraded, which can return
+    // false UNPLAYABLE/Video unavailable responses. Retry with explicit clients.
+    console.warn("[youtube-auth] Default player client reported unavailable; retrying default,web_embedded.");
+    try {
+      return await runPythonYtdlp(url, {
+        ...baseFlags,
+        extractorArgs: "youtube:player_client=default,web_embedded"
+      }, options);
+    } catch (secondErr) {
+      if (!isPlayerAvailabilityError(secondErr)) throw rewriteYouTubeError(secondErr);
+
+      // For public videos, a logged-in account/session can itself be the problem.
+      // One final anonymous web/default retry avoids a stale-account false negative.
+      if (youtubeCookieFile) {
+        console.warn("[youtube-auth] Authenticated alternate client failed; retrying public default,web once.");
+        const publicFlags = {
+          ...baseFlags,
+          extractorArgs: "youtube:player_client=default,web"
+        };
+        delete publicFlags.cookies;
+        try {
+          return await runPythonYtdlp(url, publicFlags, options);
+        } catch (thirdErr) {
+          throw rewriteYouTubeError(thirdErr);
+        }
+      }
+      throw rewriteYouTubeError(secondErr);
+    }
   }
 }
 
