@@ -6,13 +6,14 @@ const root = process.cwd();
 const providerDir = path.join(root, ".pot-provider");
 const serverDir = path.join(providerDir, "server");
 const scriptPath = path.join(serverDir, "build", "generate_once.js");
+const tscPath = path.join(serverDir, "node_modules", "typescript", "bin", "tsc");
 
-function run(command, args, cwd = root) {
+function run(command, args, cwd = root, extraEnv = {}) {
   console.log(`[youtube-pot-setup] ${command} ${args.join(" ")}`);
   const result = spawnSync(command, args, {
     cwd,
     stdio: "inherit",
-    env: process.env,
+    env: { ...process.env, ...extraEnv },
     shell: process.platform === "win32"
   });
   if (result.error) throw result.error;
@@ -31,8 +32,18 @@ try {
     "https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git",
     providerDir
   ]);
-  run("npm", ["ci", "--no-audit", "--no-fund"], serverDir);
-  run("npx", ["tsc"], serverDir);
+
+  // Render runs with NODE_ENV=production, which would otherwise omit the
+  // provider's devDependencies (including TypeScript). Force them on here.
+  run("npm", ["ci", "--include=dev", "--no-audit", "--no-fund"], serverDir, {
+    npm_config_production: "false",
+    NPM_CONFIG_PRODUCTION: "false"
+  });
+
+  if (!fs.existsSync(tscPath)) {
+    throw new Error(`TypeScript compiler missing at ${tscPath}`);
+  }
+  run(process.execPath, [tscPath], serverDir);
 
   if (!fs.existsSync(scriptPath)) {
     throw new Error(`PO token generator was not built at ${scriptPath}`);
