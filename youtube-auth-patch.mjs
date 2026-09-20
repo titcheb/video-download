@@ -125,11 +125,15 @@ function isPlayerAvailabilityError(err) {
   return /video unavailable|page needs to be reloaded|playability status|this content isn.?t available|try again later/i.test(errorText(err));
 }
 
+function isAuthenticationError(err) {
+  return /sign in to confirm you.?re not a bot|confirm you.?re not a bot|login required|use --cookies|cookies-from-browser|authentication|account.?required|please sign in/i.test(errorText(err));
+}
+
 function rewriteYouTubeError(err) {
   const message = errorText(err);
-  if (/sign in to confirm you.?re not a bot|confirm you.?re not a bot|login required|use --cookies|cookies-from-browser|authentication/i.test(message)) {
+  if (isAuthenticationError(err)) {
     const friendly = youtubeCookieFile
-      ? "YouTube rejected the authenticated request. Export fresh YouTube cookies and update YOUTUBE_COOKIES_B64 in Render, then retry."
+      ? "YouTube rejected both the authenticated request and NanoFetch's public fallback. For account-only videos, export fresh YouTube cookies using the incognito/robots.txt method and update YOUTUBE_COOKIES_B64 in Render."
       : "YouTube is requiring authentication. Configure YOUTUBE_COOKIES_B64 in Render using fresh cookies exported from the browser where YouTube works.";
     const wrapped = new Error(friendly);
     wrapped.cause = err;
@@ -141,11 +145,21 @@ function rewriteYouTubeError(err) {
     return wrapped;
   }
   if (isPlayerAvailabilityError(err)) {
-    const wrapped = new Error("YouTube reported this video as unavailable after NanoFetch retried alternate YouTube player clients. If the video plays in your browser, refresh YOUTUBE_COOKIES_B64 and YOUTUBE_USER_AGENT in Render.");
+    const wrapped = new Error("YouTube reported this video as unavailable after NanoFetch retried alternate authenticated and public player clients.");
     wrapped.cause = err;
     return wrapped;
   }
   return err;
+}
+
+async function runPublicFallback(url, baseFlags, options) {
+  const publicFlags = {
+    ...baseFlags,
+    extractorArgs: "youtube:player_client=default,web_embedded,android_vr"
+  };
+  delete publicFlags.cookies;
+  console.warn("[youtube-auth] Retrying YouTube without account cookies using public player clients.");
+  return runPythonYtdlp(url, publicFlags, options);
 }
 
 async function runYouTube(url, flags = {}, options = {}) {
@@ -164,10 +178,19 @@ async function runYouTube(url, flags = {}, options = {}) {
   try {
     return await runPythonYtdlp(url, baseFlags, options);
   } catch (firstErr) {
+    // Public videos often work better without account cookies when YouTube rejects
+    // a datacenter-origin authenticated session. Try public clients before failing.
+    if (youtubeCookieFile && isAuthenticationError(firstErr)) {
+      try {
+        return await runPublicFallback(url, baseFlags, options);
+      } catch (publicErr) {
+        throw rewriteYouTubeError(publicErr);
+      }
+    }
+
     if (!isPlayerAvailabilityError(firstErr)) throw rewriteYouTubeError(firstErr);
 
-    // Logged-in yt-dlp sessions may select tv_downgraded, which can return
-    // false UNPLAYABLE/Video unavailable responses. Retry with explicit clients.
+    // Logged-in yt-dlp sessions may select a client that returns false UNPLAYABLE.
     console.warn("[youtube-auth] Default player client reported unavailable; retrying default,web_embedded.");
     try {
       return await runPythonYtdlp(url, {
@@ -175,19 +198,13 @@ async function runYouTube(url, flags = {}, options = {}) {
         extractorArgs: "youtube:player_client=default,web_embedded"
       }, options);
     } catch (secondErr) {
-      if (!isPlayerAvailabilityError(secondErr)) throw rewriteYouTubeError(secondErr);
+      if (!isPlayerAvailabilityError(secondErr) && !isAuthenticationError(secondErr)) {
+        throw rewriteYouTubeError(secondErr);
+      }
 
-      // For public videos, a logged-in account/session can itself be the problem.
-      // One final anonymous web/default retry avoids a stale-account false negative.
       if (youtubeCookieFile) {
-        console.warn("[youtube-auth] Authenticated alternate client failed; retrying public default,web once.");
-        const publicFlags = {
-          ...baseFlags,
-          extractorArgs: "youtube:player_client=default,web"
-        };
-        delete publicFlags.cookies;
         try {
-          return await runPythonYtdlp(url, publicFlags, options);
+          return await runPublicFallback(url, baseFlags, options);
         } catch (thirdErr) {
           throw rewriteYouTubeError(thirdErr);
         }
