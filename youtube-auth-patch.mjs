@@ -10,6 +10,7 @@ const previousYtdlp = require(modulePath);
 
 const DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36";
 const PYDEPS = path.join(process.cwd(), "pydeps");
+const POT_SCRIPT = path.join(process.cwd(), ".pot-provider", "server", "build", "generate_once.js");
 
 function isYouTubeUrl(rawUrl) {
   try {
@@ -37,7 +38,6 @@ function cookieTextFromEnvironment() {
       console.error("[youtube-auth] YOUTUBE_COOKIES_B64 could not be decoded.");
     }
   }
-
   const raw = String(process.env.YOUTUBE_COOKIES || "").trim();
   return raw ? normalizeCookieText(raw) : "";
 }
@@ -89,12 +89,8 @@ function runPythonYtdlp(url, flags = {}, options = {}) {
     let stderr = "";
     const max = 24 * 1024 * 1024;
 
-    child.stdout.on("data", chunk => {
-      if (stdout.length < max) stdout += chunk.toString();
-    });
-    child.stderr.on("data", chunk => {
-      if (stderr.length < max) stderr += chunk.toString();
-    });
+    child.stdout.on("data", chunk => { if (stdout.length < max) stdout += chunk.toString(); });
+    child.stderr.on("data", chunk => { if (stderr.length < max) stderr += chunk.toString(); });
 
     const timeoutMs = Number(options?.timeout || 180000);
     const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
@@ -129,13 +125,21 @@ function isAuthenticationError(err) {
   return /sign in to confirm you.?re not a bot|confirm you.?re not a bot|login required|use --cookies|cookies-from-browser|authentication|account.?required|please sign in/i.test(errorText(err));
 }
 
+function isTokenCandidateError(err) {
+  return isAuthenticationError(err) || isPlayerAvailabilityError(err) || /http error 403|forbidden|po token|proof of origin|no video formats found/i.test(errorText(err));
+}
+
+function potExtractorArgs() {
+  return [
+    "youtube:player_client=mweb",
+    `youtubepot-bgutilscript:script_path=${POT_SCRIPT}`
+  ];
+}
+
 function rewriteYouTubeError(err) {
   const message = errorText(err);
   if (isAuthenticationError(err)) {
-    const friendly = youtubeCookieFile
-      ? "YouTube rejected both the authenticated request and NanoFetch's public fallback. For account-only videos, export fresh YouTube cookies using the incognito/robots.txt method and update YOUTUBE_COOKIES_B64 in Render."
-      : "YouTube is requiring authentication. Configure YOUTUBE_COOKIES_B64 in Render using fresh cookies exported from the browser where YouTube works.";
-    const wrapped = new Error(friendly);
+    const wrapped = new Error("YouTube rejected NanoFetch after authenticated, public, and automatic PO-token attempts. If this video requires an account, refresh YOUTUBE_COOKIES_B64 using the incognito/robots.txt method. If it is public, the Render IP/session may be temporarily rate-limited by YouTube.");
     wrapped.cause = err;
     return wrapped;
   }
@@ -145,7 +149,7 @@ function rewriteYouTubeError(err) {
     return wrapped;
   }
   if (isPlayerAvailabilityError(err)) {
-    const wrapped = new Error("YouTube reported this video as unavailable after NanoFetch retried alternate authenticated and public player clients.");
+    const wrapped = new Error("YouTube reported this video as unavailable after NanoFetch tried normal, public, and automatic PO-token mweb clients.");
     wrapped.cause = err;
     return wrapped;
   }
@@ -158,8 +162,22 @@ async function runPublicFallback(url, baseFlags, options) {
     extractorArgs: "youtube:player_client=default,web_embedded,android_vr"
   };
   delete publicFlags.cookies;
-  console.warn("[youtube-auth] Retrying YouTube without account cookies using public player clients.");
+  console.warn("[youtube-auth] Retrying without account cookies using public player clients.");
   return runPythonYtdlp(url, publicFlags, options);
+}
+
+async function runPotFallback(url, baseFlags, options, authenticated) {
+  if (!fs.existsSync(POT_SCRIPT)) {
+    throw new Error(`YouTube PO token provider is unavailable at ${POT_SCRIPT}`);
+  }
+  const potFlags = {
+    ...baseFlags,
+    extractorArgs: potExtractorArgs(),
+    jsRuntimes: "node"
+  };
+  if (!authenticated) delete potFlags.cookies;
+  console.warn(`[youtube-auth] Retrying with mweb + automatic PO token (${authenticated ? "authenticated" : "public"}).`);
+  return runPythonYtdlp(url, potFlags, options);
 }
 
 async function runYouTube(url, flags = {}, options = {}) {
@@ -170,7 +188,7 @@ async function runYouTube(url, flags = {}, options = {}) {
     retries: Math.max(Number(flags.retries || 0), 3),
     fragmentRetries: Math.max(Number(flags.fragmentRetries || 0), 3),
     extractorRetries: 3,
-    sleepRequests: flags.sleepRequests ?? 1
+    sleepRequests: flags.sleepRequests ?? 2
   };
 
   if (youtubeCookieFile) baseFlags.cookies = youtubeCookieFile;
@@ -178,9 +196,23 @@ async function runYouTube(url, flags = {}, options = {}) {
   try {
     return await runPythonYtdlp(url, baseFlags, options);
   } catch (firstErr) {
-    // Public videos often work better without account cookies when YouTube rejects
-    // a datacenter-origin authenticated session. Try public clients before failing.
-    if (youtubeCookieFile && isAuthenticationError(firstErr)) {
+    if (!isTokenCandidateError(firstErr)) throw rewriteYouTubeError(firstErr);
+
+    if (youtubeCookieFile) {
+      try {
+        return await runPotFallback(url, baseFlags, options, true);
+      } catch (potAuthErr) {
+        console.warn(`[youtube-auth] Authenticated PO-token attempt failed: ${errorText(potAuthErr).slice(0, 500)}`);
+      }
+    }
+
+    try {
+      return await runPotFallback(url, baseFlags, options, false);
+    } catch (potPublicErr) {
+      console.warn(`[youtube-auth] Public PO-token attempt failed: ${errorText(potPublicErr).slice(0, 500)}`);
+    }
+
+    if (youtubeCookieFile) {
       try {
         return await runPublicFallback(url, baseFlags, options);
       } catch (publicErr) {
@@ -188,29 +220,7 @@ async function runYouTube(url, flags = {}, options = {}) {
       }
     }
 
-    if (!isPlayerAvailabilityError(firstErr)) throw rewriteYouTubeError(firstErr);
-
-    // Logged-in yt-dlp sessions may select a client that returns false UNPLAYABLE.
-    console.warn("[youtube-auth] Default player client reported unavailable; retrying default,web_embedded.");
-    try {
-      return await runPythonYtdlp(url, {
-        ...baseFlags,
-        extractorArgs: "youtube:player_client=default,web_embedded"
-      }, options);
-    } catch (secondErr) {
-      if (!isPlayerAvailabilityError(secondErr) && !isAuthenticationError(secondErr)) {
-        throw rewriteYouTubeError(secondErr);
-      }
-
-      if (youtubeCookieFile) {
-        try {
-          return await runPublicFallback(url, baseFlags, options);
-        } catch (thirdErr) {
-          throw rewriteYouTubeError(thirdErr);
-        }
-      }
-      throw rewriteYouTubeError(secondErr);
-    }
+    throw rewriteYouTubeError(firstErr);
   }
 }
 
