@@ -1,6 +1,6 @@
 {
   "name": "neonfetch",
-  "version": "5.4.1",
+  "version": "5.4.2",
   "private": true,
   "description": "High-tech public media downloader for files you own or are authorized to download.",
   "type": "module",
