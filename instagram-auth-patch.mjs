@@ -2,12 +2,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
+import { spawn } from "node:child_process";
 
 const require = createRequire(import.meta.url);
 const modulePath = require.resolve("youtube-dl-exec");
 const originalYtdlp = require(modulePath);
 
-const IG_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
+const IG_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36";
+const PYDEPS = path.join(process.cwd(), "pydeps");
 
 function isInstagramUrl(rawUrl) {
   try {
@@ -70,12 +72,78 @@ function prepareCookieFile() {
 
 const instagramCookieFile = prepareCookieFile();
 
+function toCliFlag(key) {
+  return `--${String(key).replace(/([a-z0-9])([A-Z])/g, "$1-$2").replace(/_/g, "-").toLowerCase()}`;
+}
+
+function flagsToArgs(flags = {}) {
+  const args = ["--ignore-config", "--no-cache-dir"];
+  for (const [key, value] of Object.entries(flags)) {
+    if (value === undefined || value === null || value === false) continue;
+    const flag = toCliFlag(key);
+    if (value === true) args.push(flag);
+    else if (Array.isArray(value)) {
+      for (const item of value) args.push(flag, String(item));
+    } else {
+      args.push(flag, String(value));
+    }
+  }
+  return args;
+}
+
+function runPythonYtdlp(url, flags = {}, options = {}) {
+  return new Promise((resolve, reject) => {
+    const args = ["-m", "yt_dlp", ...flagsToArgs(flags), String(url)];
+    const env = {
+      ...process.env,
+      PYTHONPATH: process.env.PYTHONPATH ? `${PYDEPS}${path.delimiter}${process.env.PYTHONPATH}` : PYDEPS
+    };
+    const child = spawn("python3", args, { env, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    const max = 24 * 1024 * 1024;
+
+    child.stdout.on("data", chunk => {
+      if (stdout.length < max) stdout += chunk.toString();
+    });
+    child.stderr.on("data", chunk => {
+      if (stderr.length < max) stderr += chunk.toString();
+    });
+
+    const timeoutMs = Number(options?.timeout || 180000);
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+    }, timeoutMs);
+
+    child.on("error", err => {
+      clearTimeout(timer);
+      err.stderr = stderr;
+      reject(err);
+    });
+
+    child.on("close", (code, signal) => {
+      clearTimeout(timer);
+      if (code === 0) return resolve(stdout.trim());
+      const err = new Error(stderr.trim() || `yt-dlp exited with code ${code}${signal ? ` (${signal})` : ""}`);
+      err.stderr = stderr;
+      err.stdout = stdout;
+      err.exitCode = code;
+      reject(err);
+    });
+  });
+}
+
 function rewriteInstagramError(err) {
   const message = String(err?.stderr || err?.message || err || "");
-  if (/redirected to the login page|rate-?limit|login required|use --cookies|cookies-from-browser/i.test(message)) {
+  if (/failed to parse json|jsondecodeerror/i.test(message)) {
+    const wrapped = new Error("Instagram returned an invalid API response. NanoFetch retried with the current yt-dlp engine, but Instagram still rejected the request. Refresh the Instagram cookies if this continues.");
+    wrapped.cause = err;
+    return wrapped;
+  }
+  if (/empty media response|redirected to the login page|rate-?limit|login required|use --cookies|cookies-from-browser/i.test(message)) {
     const friendly = instagramCookieFile
-      ? "Instagram temporarily rejected this authenticated request. Refresh the Instagram cookie secret and try again."
-      : "Instagram is rate-limiting anonymous server requests. Configure INSTAGRAM_SESSIONID or INSTAGRAM_COOKIES_B64 on the server.";
+      ? "Instagram rejected the authenticated request. Export fresh Instagram cookies and update INSTAGRAM_COOKIES_B64, then retry."
+      : "Instagram is rate-limiting anonymous server requests. Configure INSTAGRAM_COOKIES_B64 on the server.";
     const wrapped = new Error(friendly);
     wrapped.cause = err;
     return wrapped;
@@ -83,27 +151,39 @@ function rewriteInstagramError(err) {
   return err;
 }
 
-function patchedYtdlp(url, flags = {}, options = {}) {
-  if (!isInstagramUrl(url)) return originalYtdlp(url, flags, options);
-
-  const nextFlags = {
+async function runInstagram(url, flags = {}, options = {}) {
+  const baseFlags = {
     ...flags,
     userAgent: flags.userAgent || IG_UA,
     sleepRequests: flags.sleepRequests ?? 1,
-    retries: Math.max(Number(flags.retries || 0), 2),
-    fragmentRetries: Math.max(Number(flags.fragmentRetries || 0), 2)
+    retries: Math.max(Number(flags.retries || 0), 3),
+    fragmentRetries: Math.max(Number(flags.fragmentRetries || 0), 3)
   };
 
-  if (instagramCookieFile) nextFlags.cookies = instagramCookieFile;
+  if (instagramCookieFile) baseFlags.cookies = instagramCookieFile;
 
   try {
-    const result = originalYtdlp(url, nextFlags, options);
-    return result && typeof result.catch === "function"
-      ? result.catch(err => { throw rewriteInstagramError(err); })
-      : result;
-  } catch (err) {
-    throw rewriteInstagramError(err);
+    return await runPythonYtdlp(url, baseFlags, options);
+  } catch (firstErr) {
+    const msg = String(firstErr?.stderr || firstErr?.message || "");
+    const canRetryAnonymous = Boolean(instagramCookieFile) && /failed to parse json|jsondecodeerror|empty media response/i.test(msg);
+    if (canRetryAnonymous) {
+      console.warn("[instagram-auth] Authenticated extractor response failed; retrying public fallback once.");
+      const fallbackFlags = { ...baseFlags };
+      delete fallbackFlags.cookies;
+      try {
+        return await runPythonYtdlp(url, fallbackFlags, options);
+      } catch (fallbackErr) {
+        throw rewriteInstagramError(fallbackErr);
+      }
+    }
+    throw rewriteInstagramError(firstErr);
   }
+}
+
+function patchedYtdlp(url, flags = {}, options = {}) {
+  if (!isInstagramUrl(url)) return originalYtdlp(url, flags, options);
+  return runInstagram(url, flags, options);
 }
 
 Object.assign(patchedYtdlp, originalYtdlp);
