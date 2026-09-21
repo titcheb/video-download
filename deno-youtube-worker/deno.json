@@ -1,0 +1,14 @@
+{
+  "tasks": {
+    "build": "deno cache main.ts && deno run -A build.ts",
+    "start": "deno run -A main.ts"
+  },
+  "deploy": {
+    "build": "deno task build",
+    "runtime": {
+      "type": "dynamic",
+      "entrypoint": "./main.ts",
+      "memory_limit": 768
+    }
+  }
+}
