@@ -5,7 +5,7 @@
   "description": "High-tech public media downloader for files you own or are authorized to download.",
   "type": "module",
   "scripts": {
-    "postinstall": "python3 -m pip install --disable-pip-version-check --no-cache-dir --upgrade --pre --target ./pydeps streamlink==8.5.0 \"yt-dlp[default]\" pytubefix==11.1.0 yt-dlp-getpot-wpc==1.1.2 && node ./setup-youtube-wpc.mjs",
+    "postinstall": "node ./postinstall.mjs",
     "start": "node --import ./instagram-auth-patch.mjs --import ./youtube-auth-patch.mjs --import ./streamlink-dm-patch.mjs --import ./direct-link-patch.mjs --import ./frontend-inject-patch.mjs server-v5.js",
     "dev": "node --watch --import ./instagram-auth-patch.mjs --import ./youtube-auth-patch.mjs --import ./streamlink-dm-patch.mjs --import ./direct-link-patch.mjs --import ./frontend-inject-patch.mjs server-v5.js",
     "companion": "node local-companion.mjs",
