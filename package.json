@@ -1,13 +1,13 @@
 {
   "name": "neonfetch",
-  "version": "5.8.3",
+  "version": "5.9.0",
   "private": true,
   "description": "High-tech public media downloader for files you own or are authorized to download.",
   "type": "module",
   "scripts": {
     "postinstall": "node ./postinstall.mjs",
-    "start": "node --import ./instagram-auth-patch.mjs --import ./youtube-auth-patch.mjs --import ./streamlink-dm-patch.mjs --import ./direct-link-patch.mjs server-v5.js",
-    "dev": "node --watch --import ./instagram-auth-patch.mjs --import ./youtube-auth-patch.mjs --import ./streamlink-dm-patch.mjs --import ./direct-link-patch.mjs server-v5.js",
+    "start": "node --import ./instagram-auth-patch.mjs --import ./youtube-auth-patch.mjs --import ./youtube-render-failover-patch.mjs --import ./streamlink-dm-patch.mjs --import ./direct-link-patch.mjs server-v5.js",
+    "dev": "node --watch --import ./instagram-auth-patch.mjs --import ./youtube-auth-patch.mjs --import ./youtube-render-failover-patch.mjs --import ./streamlink-dm-patch.mjs --import ./direct-link-patch.mjs server-v5.js",
     "companion": "node local-companion.mjs",
     "youtube-local": "node youtube-local.js"
   },
