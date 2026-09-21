@@ -10,7 +10,7 @@ const previousYtdlp = require(modulePath);
 
 const DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36";
 const PYDEPS = path.join(process.cwd(), "pydeps");
-const POT_SCRIPT = path.join(process.cwd(), ".pot-provider", "server", "build", "generate_once.js");
+const PYTUBEFIX_BRIDGE = path.join(process.cwd(), "pytubefix_bridge.py");
 
 function isYouTubeUrl(rawUrl) {
   try {
@@ -58,6 +58,13 @@ function prepareCookieFile() {
 
 const youtubeCookieFile = prepareCookieFile();
 
+function pythonEnv() {
+  return {
+    ...process.env,
+    PYTHONPATH: process.env.PYTHONPATH ? `${PYDEPS}${path.delimiter}${process.env.PYTHONPATH}` : PYDEPS
+  };
+}
+
 function toCliFlag(key) {
   return `--${String(key).replace(/([a-z0-9])([A-Z])/g, "$1-$2").replace(/_/g, "-").toLowerCase()}`;
 }
@@ -77,14 +84,12 @@ function flagsToArgs(flags = {}) {
   return args;
 }
 
-function runPythonYtdlp(url, flags = {}, options = {}) {
+function spawnCaptured(command, args, options = {}) {
   return new Promise((resolve, reject) => {
-    const args = ["-m", "yt_dlp", ...flagsToArgs(flags), String(url)];
-    const env = {
-      ...process.env,
-      PYTHONPATH: process.env.PYTHONPATH ? `${PYDEPS}${path.delimiter}${process.env.PYTHONPATH}` : PYDEPS
-    };
-    const child = spawn("python3", args, { env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, {
+      env: options.env || process.env,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
     let stdout = "";
     let stderr = "";
     const max = 24 * 1024 * 1024;
@@ -92,7 +97,7 @@ function runPythonYtdlp(url, flags = {}, options = {}) {
     child.stdout.on("data", chunk => { if (stdout.length < max) stdout += chunk.toString(); });
     child.stderr.on("data", chunk => { if (stderr.length < max) stderr += chunk.toString(); });
 
-    const timeoutMs = Number(options?.timeout || 180000);
+    const timeoutMs = Number(options.timeout || 180000);
     const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
 
     child.on("error", err => {
@@ -104,12 +109,53 @@ function runPythonYtdlp(url, flags = {}, options = {}) {
     child.on("close", (code, signal) => {
       clearTimeout(timer);
       if (code === 0) return resolve(stdout.trim());
-      const err = new Error(stderr.trim() || `yt-dlp exited with code ${code}${signal ? ` (${signal})` : ""}`);
+      const err = new Error(stderr.trim() || `${command} exited with code ${code}${signal ? ` (${signal})` : ""}`);
       err.stderr = stderr;
       err.stdout = stdout;
       err.exitCode = code;
       reject(err);
     });
+  });
+}
+
+function runPythonYtdlp(url, flags = {}, options = {}) {
+  const args = ["-m", "yt_dlp", ...flagsToArgs(flags), String(url)];
+  return spawnCaptured("python3", args, {
+    env: pythonEnv(),
+    timeout: Number(options?.timeout || 180000)
+  });
+}
+
+function pytubefixMode(flags = {}) {
+  const selector = String(flags.format || "");
+  const audioOnly = /^ba(?:\[|\/|$)/i.test(selector.trim()) && !/bv/i.test(selector);
+  const heightMatch = selector.match(/height<=([0-9]+)/i);
+  return {
+    audioOnly,
+    maxHeight: heightMatch ? Math.max(144, Math.min(2160, Number(heightMatch[1]))) : 720
+  };
+}
+
+async function runPytubefix(url, flags = {}, options = {}) {
+  if (!fs.existsSync(PYTUBEFIX_BRIDGE)) {
+    throw new Error(`pytubefix bridge is unavailable at ${PYTUBEFIX_BRIDGE}`);
+  }
+
+  const inspectMode = Boolean(flags.dumpSingleJson || flags.skipDownload);
+  const args = [PYTUBEFIX_BRIDGE];
+  if (inspectMode) {
+    args.push("inspect", String(url));
+  } else {
+    const output = String(flags.output || "");
+    if (!output) throw new Error("pytubefix fallback requires an output template");
+    const { audioOnly, maxHeight } = pytubefixMode(flags);
+    args.push("download", String(url), output, audioOnly ? "audio" : "video", String(maxHeight));
+  }
+
+  console.warn(`[youtube-auth] Falling back to pytubefix (${inspectMode ? "inspect" : "download"}).`);
+  return spawnCaptured("python3", args, {
+    env: pythonEnv(),
+    timeout: Math.max(Number(options?.timeout || 180000), inspectMode ? 60000 : 180000)
   });
 }
 
@@ -125,31 +171,27 @@ function isAuthenticationError(err) {
   return /sign in to confirm you.?re not a bot|confirm you.?re not a bot|login required|use --cookies|cookies-from-browser|authentication|account.?required|please sign in/i.test(errorText(err));
 }
 
-function isTokenCandidateError(err) {
-  return isAuthenticationError(err) || isPlayerAvailabilityError(err) || /http error 403|forbidden|po token|proof of origin|no video formats found/i.test(errorText(err));
+function isFallbackCandidateError(err) {
+  return isAuthenticationError(err) || isPlayerAvailabilityError(err) || /http error 403|forbidden|po token|proof of origin|no video formats found|requested format is not available/i.test(errorText(err));
 }
 
-function potExtractorArgs() {
-  return [
-    "youtube:player_client=mweb",
-    `youtubepot-bgutilscript:script_path=${POT_SCRIPT}`
-  ];
-}
+function rewriteYouTubeError(err, pytubefixErr = null) {
+  const main = errorText(err);
+  const pf = pytubefixErr ? errorText(pytubefixErr) : "";
 
-function rewriteYouTubeError(err) {
-  const message = errorText(err);
+  if (pytubefixErr) {
+    const wrapped = new Error(`YouTube failed with both yt-dlp and pytubefix. pytubefix: ${pf.slice(0, 500) || "unknown error"}`);
+    wrapped.cause = pytubefixErr;
+    return wrapped;
+  }
+
   if (isAuthenticationError(err)) {
-    const wrapped = new Error("YouTube rejected NanoFetch after authenticated, public, and automatic PO-token attempts. If this video requires an account, refresh YOUTUBE_COOKIES_B64 using the incognito/robots.txt method. If it is public, the Render IP/session may be temporarily rate-limited by YouTube.");
+    const wrapped = new Error("YouTube rejected the request. NanoFetch will normally retry through pytubefix automatically; if this persists, the Render IP may be rate-limited by YouTube.");
     wrapped.cause = err;
     return wrapped;
   }
-  if (/requested format is not available/i.test(message)) {
+  if (/requested format is not available/i.test(main)) {
     const wrapped = new Error("The requested YouTube quality is not available for this video. Try another quality.");
-    wrapped.cause = err;
-    return wrapped;
-  }
-  if (isPlayerAvailabilityError(err)) {
-    const wrapped = new Error("YouTube reported this video as unavailable after NanoFetch tried normal, public, and automatic PO-token mweb clients.");
     wrapped.cause = err;
     return wrapped;
   }
@@ -162,22 +204,8 @@ async function runPublicFallback(url, baseFlags, options) {
     extractorArgs: "youtube:player_client=default,web_embedded,android_vr"
   };
   delete publicFlags.cookies;
-  console.warn("[youtube-auth] Retrying without account cookies using public player clients.");
+  console.warn("[youtube-auth] Retrying yt-dlp without account cookies using public player clients.");
   return runPythonYtdlp(url, publicFlags, options);
-}
-
-async function runPotFallback(url, baseFlags, options, authenticated) {
-  if (!fs.existsSync(POT_SCRIPT)) {
-    throw new Error(`YouTube PO token provider is unavailable at ${POT_SCRIPT}`);
-  }
-  const potFlags = {
-    ...baseFlags,
-    extractorArgs: potExtractorArgs(),
-    jsRuntimes: "node"
-  };
-  if (!authenticated) delete potFlags.cookies;
-  console.warn(`[youtube-auth] Retrying with mweb + automatic PO token (${authenticated ? "authenticated" : "public"}).`);
-  return runPythonYtdlp(url, potFlags, options);
 }
 
 async function runYouTube(url, flags = {}, options = {}) {
@@ -188,7 +216,7 @@ async function runYouTube(url, flags = {}, options = {}) {
     retries: Math.max(Number(flags.retries || 0), 3),
     fragmentRetries: Math.max(Number(flags.fragmentRetries || 0), 3),
     extractorRetries: 3,
-    sleepRequests: flags.sleepRequests ?? 2
+    sleepRequests: flags.sleepRequests ?? 1
   };
 
   if (youtubeCookieFile) baseFlags.cookies = youtubeCookieFile;
@@ -196,31 +224,25 @@ async function runYouTube(url, flags = {}, options = {}) {
   try {
     return await runPythonYtdlp(url, baseFlags, options);
   } catch (firstErr) {
-    if (!isTokenCandidateError(firstErr)) throw rewriteYouTubeError(firstErr);
+    if (!isFallbackCandidateError(firstErr)) throw rewriteYouTubeError(firstErr);
 
-    if (youtubeCookieFile) {
-      try {
-        return await runPotFallback(url, baseFlags, options, true);
-      } catch (potAuthErr) {
-        console.warn(`[youtube-auth] Authenticated PO-token attempt failed: ${errorText(potAuthErr).slice(0, 500)}`);
-      }
-    }
-
+    let pytubefixErr = null;
     try {
-      return await runPotFallback(url, baseFlags, options, false);
-    } catch (potPublicErr) {
-      console.warn(`[youtube-auth] Public PO-token attempt failed: ${errorText(potPublicErr).slice(0, 500)}`);
+      return await runPytubefix(url, baseFlags, options);
+    } catch (err) {
+      pytubefixErr = err;
+      console.warn(`[youtube-auth] pytubefix fallback failed: ${errorText(err).slice(0, 500)}`);
     }
 
     if (youtubeCookieFile) {
       try {
         return await runPublicFallback(url, baseFlags, options);
       } catch (publicErr) {
-        throw rewriteYouTubeError(publicErr);
+        throw rewriteYouTubeError(publicErr, pytubefixErr);
       }
     }
 
-    throw rewriteYouTubeError(firstErr);
+    throw rewriteYouTubeError(firstErr, pytubefixErr);
   }
 }
 
