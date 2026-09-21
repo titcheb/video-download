@@ -25,7 +25,7 @@ try {
     "--pre",
     "--target", "./pydeps",
     "streamlink==8.5.0",
-    "yt-dlp[default]",
+    "yt-dlp[default,curl-cffi]",
     "pytubefix==11.1.0",
     "yt-dlp-getpot-wpc==1.1.2"
   ]);
