@@ -75,7 +75,7 @@ function sessionValid(value) {
 
 function requireSession(req, res, next) {
   const token = req.get("X-NanoFetch-Session") || req.query.session;
-  if (!sessionValid(token)) return res.status(401).json({ ok: false, error: "Local Companion session expired. Refresh NanoFetch and try again." });
+  if (!sessionValid(token)) return res.status(401).json({ ok: false, error: "Local Companion session expired. Refresh NanoFetch Local Companion and try again." });
   next();
 }
 
@@ -205,12 +205,29 @@ async function prepareDownload(url, mode, height) {
   return { dir, ...files[0] };
 }
 
+app.get("/", (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.type("html").send(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NanoFetch Local Companion</title>
+<style>
+:root{color-scheme:dark;--bg:#06101a;--panel:#0d1828;--line:rgba(255,255,255,.1);--text:#f6fbff;--muted:#8998ad;--cyan:#5ce7ff;--violet:#8f72ff;--green:#43e6a5;--red:#ff758b}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 15% 0%,rgba(92,231,255,.14),transparent 28%),radial-gradient(circle at 85% 10%,rgba(143,114,255,.15),transparent 30%),var(--bg);font-family:Inter,system-ui,sans-serif;color:var(--text)}.wrap{width:min(900px,calc(100% - 28px));margin:0 auto;padding:40px 0 70px}.top{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:34px}.brand{font-weight:900;font-size:20px}.brand small{display:block;font-size:10px;color:var(--muted);letter-spacing:.13em;margin-top:4px}.status{border:1px solid var(--line);border-radius:999px;padding:8px 11px;color:var(--green);font-size:11px}.hero{border:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.018));border-radius:24px;padding:24px;box-shadow:0 30px 90px rgba(0,0,0,.3)}h1{font-size:clamp(30px,7vw,56px);line-height:1;margin:0 0 12px;letter-spacing:-.05em}.lead{color:var(--muted);line-height:1.65;margin:0 0 22px}.row{display:flex;gap:10px}.row input{flex:1;background:#07101b;border:1px solid var(--line);border-radius:13px;color:#fff;padding:15px;outline:none}.row input:focus{border-color:rgba(92,231,255,.4)}button{border:0;border-radius:13px;padding:0 20px;background:linear-gradient(135deg,var(--cyan),#b9f8ff);color:#061018;font-weight:900;cursor:pointer;min-height:50px}button:disabled{opacity:.55;cursor:not-allowed}.msg{margin-top:16px;padding:13px 14px;border:1px solid var(--line);border-radius:12px;color:var(--muted);display:none}.msg.show{display:block}.msg.err{border-color:rgba(255,117,139,.35);color:#ffd6de;background:rgba(255,117,139,.06)}.media{display:none;margin-top:18px;border-top:1px solid var(--line);padding-top:20px}.media.show{display:block}.head{display:flex;gap:16px;align-items:center}.thumb{width:150px;aspect-ratio:16/9;object-fit:cover;background:#142136;border-radius:12px}.meta h2{margin:0 0 7px;font-size:19px}.meta p{margin:0;color:var(--muted);font-size:12px}.formats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:18px}.f{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:13px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.025)}.f strong{font-size:13px}.f span{display:block;color:var(--muted);font-size:10px;margin-top:3px}.f a{background:linear-gradient(135deg,var(--violet),#b19cff);color:#fff;padding:9px 11px;border-radius:9px;text-decoration:none;font-size:10px;font-weight:900}.back{display:inline-block;margin-top:22px;color:var(--cyan);text-decoration:none;font-size:12px}@media(max-width:650px){.row{flex-direction:column}.formats{grid-template-columns:1fr}.head{align-items:flex-start}.thumb{width:105px}.top{align-items:flex-start;flex-direction:column}}
+</style></head><body><div class="wrap"><div class="top"><div class="brand">NanoFetch Local Companion<small>YOUTUBE THROUGH YOUR OWN CONNECTION</small></div><div class="status">● LOCAL ENGINE READY</div></div><main class="hero"><h1>Local YouTube mode.</h1><p class="lead">This page runs entirely on your computer at 127.0.0.1. YouTube traffic does not pass through Render.</p><div class="row"><input id="url" placeholder="Paste YouTube URL..."><button id="go">Analyze</button></div><div id="msg" class="msg"></div><section id="media" class="media"><div class="head"><img id="thumb" class="thumb" alt="Thumbnail"><div class="meta"><h2 id="title"></h2><p id="meta"></p></div></div><div id="formats" class="formats"></div></section><a class="back" href="https://neonfetch-x.onrender.com/">← Back to NanoFetch X</a></main></div>
+<script>
+const $=id=>document.getElementById(id),url=$('url'),go=$('go'),msg=$('msg'),media=$('media'),thumb=$('thumb'),title=$('title'),meta=$('meta'),formats=$('formats');let session='';
+const initial=new URLSearchParams(location.search).get('url')||'';url.value=initial;
+function show(text,error=false){msg.textContent=text;msg.className='msg show'+(error?' err':'')}
+async function boot(){try{const r=await fetch('/health',{cache:'no-store'});const d=await r.json();if(!d.ok||!d.session)throw new Error('Companion health check failed.');session=d.session;show('Local Companion is ready.');if(initial) analyze();}catch(e){show(e.message||'Local Companion is unavailable.',true)}}
+async function analyze(){const value=url.value.trim();if(!value)return show('Paste a YouTube URL first.',true);go.disabled=true;go.textContent='Analyzing…';media.classList.remove('show');show('Reading YouTube through your local connection…');try{const r=await fetch('/inspect',{method:'POST',headers:{'Content-Type':'application/json','X-NanoFetch-Session':session},body:JSON.stringify({url:value})});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Unable to analyze this YouTube URL.');thumb.src=d.thumbnail||'';title.textContent=d.title||'YouTube video';meta.textContent=[d.uploader,d.sourceHost].filter(Boolean).join(' · ');formats.innerHTML='';(d.formats||[]).forEach(f=>{const row=document.createElement('div');row.className='f';const left=document.createElement('div');const s=document.createElement('strong');s.textContent=f.label||f.quality||'Download';const x=document.createElement('span');x.textContent=[String(f.ext||'').toUpperCase(),f.type==='audio'?'Audio':'Video'].join(' · ');left.append(s,x);const a=document.createElement('a');a.href=f.downloadUrl;a.textContent='DOWNLOAD ↓';row.append(left,a);formats.append(row)});media.classList.add('show');show('Choose a quality below. Download is prepared locally.');}catch(e){show(e.message||'Local YouTube analysis failed.',true)}finally{go.disabled=false;go.textContent='Analyze'}}
+go.addEventListener('click',analyze);url.addEventListener('keydown',e=>{if(e.key==='Enter')analyze()});boot();
+</script></body></html>`);
+});
+
 app.get("/health", (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   res.json({
     ok: true,
     service: "NanoFetch Local Companion",
-    version: "1.0.0",
+    version: "1.1.0",
     session: SESSION,
     youtube: true,
     ffmpeg: Boolean(ffmpegPath)
@@ -253,8 +270,8 @@ app.get("/download", requireSession, async (req, res) => {
 app.listen(PORT, HOST, () => {
   console.log("");
   console.log("NanoFetch Local Companion is READY");
-  console.log(`Listening only on this computer: http://${HOST}:${PORT}`);
-  console.log("Keep this window open while using YouTube on NeonFetch X.");
+  console.log(`Open: http://${HOST}:${PORT}`);
+  console.log("Keep this window open while using YouTube on NanoFetch X.");
   console.log("Press Ctrl+C to stop.");
   console.log("");
 });
