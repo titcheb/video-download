@@ -25,8 +25,10 @@ if not exist node_modules\youtube-dl-exec (
 
 echo.
 echo Starting NanoFetch Local Companion...
+echo Your browser will open the local YouTube page automatically.
 echo Keep this window open while downloading YouTube videos.
 echo.
+start "" cmd /c "timeout /t 3 /nobreak >nul & start \"\" http://127.0.0.1:17345/"
 call npm run companion
 
 pause
