@@ -56,7 +56,24 @@ function prepareCookieFile() {
   }
 }
 
+function readYouTubeProxy() {
+  const raw = String(process.env.YOUTUBE_PROXY || "").trim();
+  if (!raw) return "";
+  if (!/^(?:https?|socks4a?|socks5h?):\/\//i.test(raw)) {
+    console.error("[youtube-auth] YOUTUBE_PROXY ignored: expected http://, https://, socks4://, socks4a://, socks5:// or socks5h:// URL.");
+    return "";
+  }
+  try {
+    const u = new URL(raw);
+    console.log(`[youtube-auth] YouTube proxy enabled (${u.protocol}//${u.hostname}${u.port ? `:${u.port}` : ""}).`);
+  } catch {
+    console.log("[youtube-auth] YouTube proxy enabled.");
+  }
+  return raw;
+}
+
 const youtubeCookieFile = prepareCookieFile();
+const youtubeProxy = readYouTubeProxy();
 
 function pythonEnv() {
   return {
@@ -152,7 +169,7 @@ async function runPytubefix(url, flags = {}, options = {}) {
     args.push("download", String(url), output, audioOnly ? "audio" : "video", String(maxHeight));
   }
 
-  console.warn(`[youtube-auth] Falling back to pytubefix (${inspectMode ? "inspect" : "download"}).`);
+  console.warn(`[youtube-auth] Falling back to pytubefix (${inspectMode ? "inspect" : "download"})${youtubeProxy ? " through YOUTUBE_PROXY" : ""}.`);
   return spawnCaptured("python3", args, {
     env: pythonEnv(),
     timeout: Math.max(Number(options?.timeout || 180000), inspectMode ? 60000 : 180000)
@@ -171,6 +188,10 @@ function isAuthenticationError(err) {
   return /sign in to confirm you.?re not a bot|confirm you.?re not a bot|login required|use --cookies|cookies-from-browser|authentication|account.?required|please sign in/i.test(errorText(err));
 }
 
+function isBotDetectionError(err) {
+  return /detected as a bot|confirm you.?re not a bot|sign in to confirm you.?re not a bot/i.test(errorText(err));
+}
+
 function isFallbackCandidateError(err) {
   return isAuthenticationError(err) || isPlayerAvailabilityError(err) || /http error 403|forbidden|po token|proof of origin|no video formats found|requested format is not available/i.test(errorText(err));
 }
@@ -179,6 +200,15 @@ function rewriteYouTubeError(err, pytubefixErr = null) {
   const main = errorText(err);
   const pf = pytubefixErr ? errorText(pytubefixErr) : "";
 
+  if (pytubefixErr && (isBotDetectionError(err) || isBotDetectionError(pytubefixErr))) {
+    const message = youtubeProxy
+      ? "YouTube is still detecting the request as a bot through YOUTUBE_PROXY. The configured proxy endpoint is likely blocked or unsuitable; replace it with another trusted proxy endpoint and retry."
+      : "YouTube is blocking Render's datacenter IP as automated traffic. Configure YOUTUBE_PROXY in Render with a trusted HTTP(S) or SOCKS proxy endpoint, then retry.";
+    const wrapped = new Error(message);
+    wrapped.cause = pytubefixErr;
+    return wrapped;
+  }
+
   if (pytubefixErr) {
     const wrapped = new Error(`YouTube failed with both yt-dlp and pytubefix. pytubefix: ${pf.slice(0, 500) || "unknown error"}`);
     wrapped.cause = pytubefixErr;
@@ -186,7 +216,7 @@ function rewriteYouTubeError(err, pytubefixErr = null) {
   }
 
   if (isAuthenticationError(err)) {
-    const wrapped = new Error("YouTube rejected the request. NanoFetch will normally retry through pytubefix automatically; if this persists, the Render IP may be rate-limited by YouTube.");
+    const wrapped = new Error("YouTube rejected the request. NanoFetch will retry through pytubefix automatically; if this persists, the server IP may be rate-limited by YouTube.");
     wrapped.cause = err;
     return wrapped;
   }
@@ -204,7 +234,7 @@ async function runPublicFallback(url, baseFlags, options) {
     extractorArgs: "youtube:player_client=default,web_embedded,android_vr"
   };
   delete publicFlags.cookies;
-  console.warn("[youtube-auth] Retrying yt-dlp without account cookies using public player clients.");
+  console.warn(`[youtube-auth] Retrying yt-dlp without account cookies using public player clients${youtubeProxy ? " through YOUTUBE_PROXY" : ""}.`);
   return runPythonYtdlp(url, publicFlags, options);
 }
 
@@ -220,6 +250,7 @@ async function runYouTube(url, flags = {}, options = {}) {
   };
 
   if (youtubeCookieFile) baseFlags.cookies = youtubeCookieFile;
+  if (youtubeProxy && !baseFlags.proxy) baseFlags.proxy = youtubeProxy;
 
   try {
     return await runPythonYtdlp(url, baseFlags, options);
