@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { spawn } from "node:child_process";
+import chromium from "@sparticuz/chromium";
 
 const require = createRequire(import.meta.url);
 const modulePath = require.resolve("youtube-dl-exec");
@@ -74,6 +75,19 @@ function readYouTubeProxy() {
 
 const youtubeCookieFile = prepareCookieFile();
 const youtubeProxy = readYouTubeProxy();
+
+let wpcBrowserPath = "";
+try {
+  wpcBrowserPath = await chromium.executablePath();
+  if (wpcBrowserPath && fs.existsSync(wpcBrowserPath)) {
+    console.log(`[youtube-auth] Headless Chromium ready for WPC PO-token provider (${wpcBrowserPath}).`);
+  } else {
+    wpcBrowserPath = "";
+  }
+} catch (err) {
+  console.warn(`[youtube-auth] Could not prepare headless Chromium for WPC: ${err?.message || err}`);
+  wpcBrowserPath = "";
+}
 
 function pythonEnv() {
   return {
@@ -169,7 +183,7 @@ async function runPytubefix(url, flags = {}, options = {}) {
     args.push("download", String(url), output, audioOnly ? "audio" : "video", String(maxHeight));
   }
 
-  console.warn(`[youtube-auth] Falling back to pytubefix (${inspectMode ? "inspect" : "download"})${youtubeProxy ? " through YOUTUBE_PROXY" : ""}.`);
+  console.warn(`[youtube-auth] Fallback: pytubefix (${inspectMode ? "inspect" : "download"})${youtubeProxy ? " through YOUTUBE_PROXY" : ""}.`);
   return spawnCaptured("python3", args, {
     env: pythonEnv(),
     timeout: Math.max(Number(options?.timeout || 180000), inspectMode ? 60000 : 180000)
@@ -180,12 +194,17 @@ function errorText(err) {
   return String(err?.stderr || err?.message || err || "");
 }
 
+function shortError(err, max = 180) {
+  const text = errorText(err).replace(/\s+/g, " ").trim();
+  return text.length > max ? `${text.slice(0, max)}...` : text;
+}
+
 function isPlayerAvailabilityError(err) {
   return /video unavailable|page needs to be reloaded|playability status|this content isn.?t available|try again later/i.test(errorText(err));
 }
 
 function isAuthenticationError(err) {
-  return /sign in to confirm you.?re not a bot|confirm you.?re not a bot|login required|use --cookies|cookies-from-browser|authentication|account.?required|please sign in/i.test(errorText(err));
+  return /sign in to confirm you.?re not a bot|confirm you.?re not a bot|detected as a bot|login required|use --cookies|cookies-from-browser|authentication|account.?required|please sign in/i.test(errorText(err));
 }
 
 function isBotDetectionError(err) {
@@ -196,46 +215,86 @@ function isFallbackCandidateError(err) {
   return isAuthenticationError(err) || isPlayerAvailabilityError(err) || /http error 403|forbidden|po token|proof of origin|no video formats found|requested format is not available/i.test(errorText(err));
 }
 
-function rewriteYouTubeError(err, pytubefixErr = null) {
-  const main = errorText(err);
-  const pf = pytubefixErr ? errorText(pytubefixErr) : "";
+function flagsForClient(baseFlags, client, authenticated) {
+  const next = {
+    ...baseFlags,
+    extractorArgs: `youtube:player_client=${client}`
+  };
+  if (!authenticated) delete next.cookies;
+  return next;
+}
 
-  if (pytubefixErr && (isBotDetectionError(err) || isBotDetectionError(pytubefixErr))) {
-    const message = youtubeProxy
-      ? "YouTube is still detecting the request as a bot through YOUTUBE_PROXY. The configured proxy endpoint is likely blocked or unsuitable; replace it with another trusted proxy endpoint and retry."
-      : "YouTube is blocking Render's datacenter IP as automated traffic. Configure YOUTUBE_PROXY in Render with a trusted HTTP(S) or SOCKS proxy endpoint, then retry.";
-    const wrapped = new Error(message);
-    wrapped.cause = pytubefixErr;
-    return wrapped;
+async function runClientFallback(url, baseFlags, options, client, authenticated = false, label = client) {
+  const flags = flagsForClient(baseFlags, client, authenticated);
+  console.warn(`[youtube-auth] Fallback: yt-dlp ${label}${authenticated ? " + cookies" : " public"}.`);
+  return runPythonYtdlp(url, flags, {
+    ...options,
+    timeout: Math.max(Number(options?.timeout || 0), 45000)
+  });
+}
+
+async function runWpcFallback(url, baseFlags, options, authenticated = false) {
+  if (!wpcBrowserPath || !fs.existsSync(wpcBrowserPath)) {
+    throw new Error("WPC browser fallback is unavailable because headless Chromium could not be prepared.");
   }
 
-  if (pytubefixErr) {
-    const wrapped = new Error(`YouTube failed with both yt-dlp and pytubefix. pytubefix: ${pf.slice(0, 500) || "unknown error"}`);
-    wrapped.cause = pytubefixErr;
-    return wrapped;
-  }
+  const flags = {
+    ...baseFlags,
+    extractorArgs: [
+      "youtube:player_client=mweb",
+      `youtubepot-wpc:browser_path=${wpcBrowserPath}`
+    ]
+  };
+  if (!authenticated) delete flags.cookies;
 
-  if (isAuthenticationError(err)) {
-    const wrapped = new Error("YouTube rejected the request. NanoFetch will retry through pytubefix automatically; if this persists, the server IP may be rate-limited by YouTube.");
-    wrapped.cause = err;
-    return wrapped;
-  }
-  if (/requested format is not available/i.test(main)) {
-    const wrapped = new Error("The requested YouTube quality is not available for this video. Try another quality.");
-    wrapped.cause = err;
-    return wrapped;
-  }
-  return err;
+  console.warn(`[youtube-auth] Fallback: mweb + WPC browser PO token${authenticated ? " + cookies" : " public"}.`);
+  return runPythonYtdlp(url, flags, {
+    ...options,
+    timeout: Math.max(Number(options?.timeout || 0), 90000)
+  });
 }
 
 async function runPublicFallback(url, baseFlags, options) {
   const publicFlags = {
     ...baseFlags,
-    extractorArgs: "youtube:player_client=default,web_embedded,android_vr"
+    extractorArgs: "youtube:player_client=tv,web_embedded,android_vr"
   };
   delete publicFlags.cookies;
-  console.warn(`[youtube-auth] Retrying yt-dlp without account cookies using public player clients${youtubeProxy ? " through YOUTUBE_PROXY" : ""}.`);
-  return runPythonYtdlp(url, publicFlags, options);
+  console.warn(`[youtube-auth] Fallback: public legacy player clients${youtubeProxy ? " through YOUTUBE_PROXY" : ""}.`);
+  return runPythonYtdlp(url, publicFlags, {
+    ...options,
+    timeout: Math.max(Number(options?.timeout || 0), 45000)
+  });
+}
+
+function rewriteYouTubeError(primaryErr, failures = []) {
+  const allErrors = [primaryErr, ...failures.map(x => x.error)].filter(Boolean);
+  const botBlocked = allErrors.some(isBotDetectionError);
+
+  if (botBlocked) {
+    const methods = failures.map(x => x.name).join(", ");
+    const message = youtubeProxy
+      ? `YouTube rejected every NanoFetch fallback through the configured route (${methods || "all methods"}). The current egress/proxy session is still being detected as automated traffic.`
+      : `YouTube rejected every no-proxy NanoFetch fallback from this Render server (${methods || "all methods"}). Normal yt-dlp, Safari HLS, embedded client, browser-generated WPC PO token, and pytubefix were attempted.`;
+    const wrapped = new Error(message);
+    wrapped.cause = failures.at(-1)?.error || primaryErr;
+    return wrapped;
+  }
+
+  if (/requested format is not available/i.test(errorText(primaryErr)) && !failures.length) {
+    const wrapped = new Error("The requested YouTube quality is not available for this video. Try another quality.");
+    wrapped.cause = primaryErr;
+    return wrapped;
+  }
+
+  if (failures.length) {
+    const summary = failures.slice(-5).map(x => `${x.name}: ${shortError(x.error, 110)}`).join(" | ");
+    const wrapped = new Error(`YouTube failed after all NanoFetch fallback methods. ${summary}`);
+    wrapped.cause = failures.at(-1)?.error || primaryErr;
+    return wrapped;
+  }
+
+  return primaryErr;
 }
 
 async function runYouTube(url, flags = {}, options = {}) {
@@ -257,23 +316,43 @@ async function runYouTube(url, flags = {}, options = {}) {
   } catch (firstErr) {
     if (!isFallbackCandidateError(firstErr)) throw rewriteYouTubeError(firstErr);
 
-    let pytubefixErr = null;
-    try {
-      return await runPytubefix(url, baseFlags, options);
-    } catch (err) {
-      pytubefixErr = err;
-      console.warn(`[youtube-auth] pytubefix fallback failed: ${errorText(err).slice(0, 500)}`);
-    }
+    const failures = [];
+    const attempt = async (name, fn) => {
+      try {
+        return { ok: true, value: await fn() };
+      } catch (error) {
+        failures.push({ name, error });
+        console.warn(`[youtube-auth] ${name} failed: ${shortError(error, 320)}`);
+        return { ok: false };
+      }
+    };
 
     if (youtubeCookieFile) {
-      try {
-        return await runPublicFallback(url, baseFlags, options);
-      } catch (publicErr) {
-        throw rewriteYouTubeError(publicErr, pytubefixErr);
-      }
+      const safariAuth = await attempt("web_safari+cookies", () => runClientFallback(url, baseFlags, options, "web_safari", true, "web_safari HLS"));
+      if (safariAuth.ok) return safariAuth.value;
     }
 
-    throw rewriteYouTubeError(firstErr, pytubefixErr);
+    const safariPublic = await attempt("web_safari", () => runClientFallback(url, baseFlags, options, "web_safari", false, "web_safari HLS"));
+    if (safariPublic.ok) return safariPublic.value;
+
+    const embedded = await attempt("web_embedded", () => runClientFallback(url, baseFlags, options, "web_embedded", false, "web_embedded"));
+    if (embedded.ok) return embedded.value;
+
+    const wpcPublic = await attempt("mweb+wpc", () => runWpcFallback(url, baseFlags, options, false));
+    if (wpcPublic.ok) return wpcPublic.value;
+
+    if (youtubeCookieFile) {
+      const wpcAuth = await attempt("mweb+wpc+cookies", () => runWpcFallback(url, baseFlags, options, true));
+      if (wpcAuth.ok) return wpcAuth.value;
+    }
+
+    const pytubefix = await attempt("pytubefix", () => runPytubefix(url, baseFlags, options));
+    if (pytubefix.ok) return pytubefix.value;
+
+    const legacy = await attempt("legacy-public", () => runPublicFallback(url, baseFlags, options));
+    if (legacy.ok) return legacy.value;
+
+    throw rewriteYouTubeError(firstErr, failures);
   }
 }
 
