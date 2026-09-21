@@ -7,7 +7,7 @@ from pathlib import Path
 from pytubefix import YouTube
 
 MAX_BYTES = 500 * 1024 * 1024
-DEFAULT_CLIENT = "WEB"
+DEFAULT_CLIENTS = ["ANDROID_VR", "IOS", "TV", "WEB_CREATOR", "WEB"]
 
 
 def proxy_config():
@@ -17,8 +17,26 @@ def proxy_config():
     return {"http": proxy, "https": proxy}
 
 
-def make_youtube(url: str) -> YouTube:
-    client = os.environ.get("PYTUBEFIX_CLIENT", DEFAULT_CLIENT).strip() or DEFAULT_CLIENT
+def client_candidates():
+    configured = os.environ.get("PYTUBEFIX_CLIENTS", "").strip()
+    single = os.environ.get("PYTUBEFIX_CLIENT", "").strip()
+    values = []
+    if configured:
+        values.extend(x.strip().upper() for x in configured.split(",") if x.strip())
+    if single:
+        values.append(single.upper())
+    values.extend(DEFAULT_CLIENTS)
+
+    seen = set()
+    result = []
+    for value in values:
+        if value and value not in seen:
+            seen.add(value)
+            result.append(value)
+    return result
+
+
+def make_youtube(url: str, client: str) -> YouTube:
     kwargs = {}
     proxies = proxy_config()
     if proxies:
@@ -39,8 +57,27 @@ def safe_attr(obj, name, default=None):
         return default
 
 
-def inspect_video(url: str):
-    yt = make_youtube(url)
+def short_error(exc):
+    text = str(exc or "").replace("\n", " ").strip()
+    return text[:420] + ("..." if len(text) > 420 else "")
+
+
+def with_working_client(url: str, operation):
+    errors = []
+    for client in client_candidates():
+        try:
+            yt = make_youtube(url, client)
+            return operation(yt, client)
+        except Exception as exc:
+            msg = short_error(exc)
+            errors.append(f"{client}: {msg}")
+            print(f"[pytubefix] {client} failed: {msg}", file=sys.stderr)
+
+    joined = " | ".join(errors[-5:])
+    raise RuntimeError(f"all pytubefix clients failed ({joined})")
+
+
+def build_inspect_result(yt: YouTube, client: str, url: str):
     streams = yt.streams
     formats = []
 
@@ -80,7 +117,7 @@ def inspect_video(url: str):
         })
 
     if not formats:
-        raise RuntimeError("pytubefix did not expose a downloadable stream for this video")
+        raise RuntimeError("no downloadable stream was exposed")
 
     return {
         "id": safe_attr(yt, "video_id", None),
@@ -96,7 +133,12 @@ def inspect_video(url: str):
         "formats": formats,
         "extractor": "pytubefix",
         "extractor_key": "Pytubefix",
+        "pytubefix_client": client,
     }
+
+
+def inspect_video(url: str):
+    return with_working_client(url, lambda yt, client: build_inspect_result(yt, client, url))
 
 
 def choose_video_stream(yt: YouTube, max_height: int):
@@ -121,7 +163,7 @@ def choose_video_stream(yt: YouTube, max_height: int):
     except Exception:
         stream = None
     if not stream:
-        raise RuntimeError("pytubefix could not find a progressive MP4 stream")
+        raise RuntimeError("could not find a progressive MP4 stream")
     return stream
 
 
@@ -131,25 +173,23 @@ def ensure_size(stream):
     except Exception:
         size = 0
     if size and size > MAX_BYTES:
-        raise RuntimeError("Selected YouTube stream is larger than the 500 MB limit")
+        raise RuntimeError("selected YouTube stream is larger than the 500 MB limit")
 
 
 def output_file_from_template(template: str, ext: str) -> Path:
     if not template:
-        raise RuntimeError("Missing output template")
+        raise RuntimeError("missing output template")
     final_path = template.replace("%(ext)s", ext)
     path = Path(final_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
 
-def download_video(url: str, output_template: str, mode: str, max_height: int):
-    yt = make_youtube(url)
-
+def download_with_client(yt: YouTube, client: str, output_template: str, mode: str, max_height: int):
     if mode == "audio":
         stream = yt.streams.get_audio_only()
         if not stream:
-            raise RuntimeError("pytubefix could not find an audio stream")
+            raise RuntimeError("could not find an audio stream")
         ext = "m4a"
     else:
         stream = choose_video_stream(yt, max_height)
@@ -169,15 +209,22 @@ def download_video(url: str, output_template: str, mode: str, max_height: int):
 
     final_path = Path(result) if result else target
     if not final_path.exists():
-        raise RuntimeError("pytubefix finished without creating the requested file")
+        raise RuntimeError("download finished without creating the requested file")
     if final_path.stat().st_size > MAX_BYTES:
         try:
             final_path.unlink()
         except Exception:
             pass
-        raise RuntimeError("Prepared YouTube file is larger than the 500 MB limit")
+        raise RuntimeError("prepared YouTube file is larger than the 500 MB limit")
 
-    return {"path": str(final_path), "engine": "pytubefix", "client": os.environ.get("PYTUBEFIX_CLIENT", DEFAULT_CLIENT)}
+    return {"path": str(final_path), "engine": "pytubefix", "client": client}
+
+
+def download_video(url: str, output_template: str, mode: str, max_height: int):
+    return with_working_client(
+        url,
+        lambda yt, client: download_with_client(yt, client, output_template, mode, max_height),
+    )
 
 
 def main():
@@ -207,5 +254,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as exc:
-        print(f"pytubefix fallback failed: {exc}", file=sys.stderr)
+        print(f"pytubefix fallback failed: {short_error(exc)}", file=sys.stderr)
         sys.exit(1)
